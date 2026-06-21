@@ -26,6 +26,7 @@ func TestExtractClientIP(t *testing.T) {
 		{"xri_valid", "10.0.0.1:8080", map[string]string{"X-Real-IP": "203.0.113.100"}, "203.0.113.100"},
 		{"xri_invalid", "10.0.0.1:8080", map[string]string{"X-Real-IP": "bad"}, "10.0.0.1"},
 		{"xff_precedence", "10.0.0.1:8080", map[string]string{"X-Forwarded-For": "203.0.113.50", "X-Real-IP": "203.0.113.100"}, "203.0.113.50"},
+		{"xri_whitespace", "10.0.0.1:8080", map[string]string{"X-Real-IP": " 203.0.113.100 "}, "203.0.113.100"},
 	}
 
 	for _, tt := range tests {
