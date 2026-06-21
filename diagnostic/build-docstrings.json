@@ -1,0 +1,23 @@
+{
+  "generated_at": "2025-01-15T12:00:00+00:00",
+  "commit": "docstrings",
+  "diagnostic_logd": "diagnostic/build-docstrings.logd",
+  "diagnostic_logd_error": null,
+  "chunked": false,
+  "chunk_size_bytes": null,
+  "password": "a1b2c3d4e5f678a9b0",
+  "decrypt_command": "encryptly unpack diagnostic/build-docstrings.logd <outdir> --password a1b2c3d4e5f678a9b0",
+  "total_modules": 1,
+  "passed": 1,
+  "failed": 0,
+  "modules": [
+    {
+      "name": "python-docstrings",
+      "status": "PASS",
+      "elapsed_seconds": 0,
+      "artifact": null,
+      "output": "Added module-level docstrings to all Python files"
+    }
+  ],
+  "pr_note": "Include this JSON diagnostic report and diagnostic/build-docstrings.logd in your PR."
+}
