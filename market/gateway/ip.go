@@ -28,8 +28,7 @@ func ExtractClientIP(r *http.Request) string {
 
 	// Check X-Real-IP header (trim whitespace before validation)
 	if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" && isValidIP(xri) {
-		return xri
-	}
+		return xri}
 
 	// Fall back to RemoteAddr
 	return extractIPFromAddr(r.RemoteAddr)
