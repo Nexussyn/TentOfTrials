@@ -1,4 +1,4 @@
-module github.com/manav8498/TentOfTrials/market
+module github.com/tent-of-trials/market
 
 go 1.26
 
