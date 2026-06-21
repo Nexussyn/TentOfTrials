@@ -9,6 +9,7 @@ authors = ["TentOfTrials"]
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_yaml = "0.9"
 toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
@@ -30,6 +31,9 @@ log = "0.4"
 
 [build-dependencies]
 tonic-build = "0.12"
+
+[dev-dependencies]
+tempfile = "3"
 
 [profile.release]
 opt-level = 3
