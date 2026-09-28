@@ -35,7 +35,7 @@ async function state(coin){
   structure:C((r5||0)*800+(r15||0)*350+(r60||0)*120+(Number.isFinite(eb)?eb*120:0),-1,1),
   flow:C((flow||0)*2.5,-1,1),
   l2:C((d.imb||0)*1.4+(d.bias||0)*3000,-1,1),
-  derivatives:C(-(funding||0)*4000+(r15<0&&Number.isFinite(oi)?.2:0),-1,1),
+  derivatives:C(-(funding||0)*4000+(r15<0&&Number.isFinite(oi)?0.2:0),-1,1),
   crossVenue:C((cross||0)*500+C((r5||0)*500,-.8,.8),-1,1)
  };
  const w={structure:.29,flow:.22,l2:.20,derivatives:.15,crossVenue:.14},score=Object.keys(blocks).reduce((s,k)=>s+blocks[k]*w[k],0);
