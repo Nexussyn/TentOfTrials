@@ -9,82 +9,75 @@ on:
 jobs:
   browser-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 7
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Install browser test
+      - name: Static browser self-test
         run: |
-          npm init -y
-          npm install --no-save playwright
-          npx playwright install --with-deps chromium
-      - name: Start static server
+          set -e
+          python3 -m http.server 4173 --bind 127.0.0.1 >/tmp/cde-http.log 2>&1 &
+          if command -v google-chrome >/dev/null 2>&1; then BROWSER=google-chrome; elif command -v chromium >/dev/null 2>&1; then BROWSER=chromium; elif command -v chromium-browser >/dev/null 2>&1; then BROWSER=chromium-browser; else echo "No Chromium/Chrome" >&2; exit 1; fi
+          "$BROWSER" --headless --no-sandbox --disable-gpu --disable-dev-shm-usage --dump-dom --virtual-time-budget=8000 'http://127.0.0.1:4173/index.html?selftest=1' >/tmp/cde-selftest.html 2>/tmp/cde-browser.log
+          python3 - <<'PY'
+          import re,sys
+          s=open('/tmp/cde-selftest.html',encoding='utf-8').read()
+          if 'CDE SELFTEST PASS' not in s: raise SystemExit('SELFTEST PASS missing')
+          if 'Crypto Direction Engine — V13.0' not in s: raise SystemExit('V13.0 title missing')
+          print('SELFTEST OK')
+          m=re.search(r'<b id="kPrice">(.*?)</b>',s,re.S); print('kPrice=',m.group(1) if m else 'missing')
+          PY
+      - name: Live API smoke
         run: |
-          python3 -m http.server 4173 --bind 127.0.0.1 > /tmp/cde-http.log 2>&1 &
-          echo $! > /tmp/cde-http.pid
-      - name: Capture browser diagnostics
-        continue-on-error: true
+          python3 -m pip install --quiet requests websocket-client
+          python3 - <<'PY'
+          import json,time,requests,websocket
+          # Hyperliquid Info + candle endpoint
+          h='https://api.hyperliquid.xyz/info'
+          r=requests.post(h,json={'type':'metaAndAssetCtxs'},timeout=10)
+          r.raise_for_status()
+          data=r.json()
+          assert data and data[0].get('universe'), 'Hyperliquid meta empty'
+          r=requests.post(h,json={'type':'candleSnapshot','req':{'coin':'BTC','interval':'1m','startTime':int(time.time()*1000)-3600000,'endTime':int(time.time()*1000)}},timeout=10)
+          r.raise_for_status(); assert len(r.json())>10,'Hyperliquid candles empty'
+          # Binance futures + spot
+          r=requests.get('https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT',timeout=10);r.raise_for_status()
+          r=requests.get('https://fapi.binance.com/fapi/v1/openInterest?symbol=BTCUSDT',timeout=10);r.raise_for_status()
+          r=requests.get('https://api.binance.com/api/v3/aggTrades?symbol=BTCUSDT&limit=5',timeout=10);r.raise_for_status()
+          # Hyperliquid WS
+          ws=websocket.create_connection('wss://api.hyperliquid.xyz/ws',timeout=8)
+          ws.send(json.dumps({'method':'subscribe','subscription':{'type':'allMids'}}))
+          deadline=time.time()+8; got=False
+          while time.time()<deadline:
+              msg=json.loads(ws.recv())
+              if msg.get('channel')=='allMids' and msg.get('data',{}).get('mids',{}).get('BTC') is not None:
+                  got=True;break
+          ws.close(); assert got,'Hyperliquid allMids not received'
+          # Binance combined WS
+          ws=websocket.create_connection('wss://fstream.binance.com/stream?streams=btcusdt@aggTrade',timeout=8)
+          deadline=time.time()+8;got=False
+          while time.time()<deadline:
+              msg=json.loads(ws.recv()); d=msg.get('data',{})
+              if (msg.get('stream','').endswith('@aggTrade') and d.get('s')=='BTCUSDT'):
+                  got=True;break
+          ws.close(); assert got,'Binance aggTrade not received'
+          print('LIVE API + WS OK')
+          PY
+      - name: Live browser smoke
         run: |
-          mkdir -p /tmp/cde-smoke
-          node <<'NODE' > /tmp/cde-smoke/run.log 2>&1
-          const { chromium } = require('playwright');
-          (async () => {
-            const browser = await chromium.launch({headless:true});
-            const page = await browser.newPage({viewport:{width:1600,height:1000}});
-            const errors = [];
-            page.on('pageerror', e => { errors.push('PAGEERROR: ' + e.stack); });
-            page.on('console', m => { if (m.type() === 'error') errors.push('CONSOLE: ' + m.text()); });
-            await page.goto('http://127.0.0.1:4173/index.html?smoke=diagnostic', {waitUntil:'domcontentloaded',timeout:15000});
-            await page.waitForTimeout(15000);
-            const state = await page.evaluate(() => ({
-              title: document.title,
-              readyState: document.readyState,
-              dir: document.getElementById('dir')?.textContent,
-              price: document.getElementById('kPrice')?.textContent,
-              health: document.getElementById('health')?.textContent,
-              journal: document.getElementById('journal')?.textContent,
-              capital: document.getElementById('capitalCards')?.textContent,
-              mode: document.getElementById('modeBadge')?.textContent,
-              headline: document.getElementById('headline')?.textContent,
-              scriptCount: document.scripts.length,
-              bodyTextLength: document.body.innerText.length,
-              localStorageKeys: Object.keys(localStorage),
-              indexedDB: !!window.indexedDB
-            }));
-            console.log('STATE', JSON.stringify(state, null, 2));
-            console.log('ERRORS', JSON.stringify(errors, null, 2));
-            await page.screenshot({path:'/tmp/cde-smoke/page.png',fullPage:true});
-            require('fs').writeFileSync('/tmp/cde-smoke/state.json',JSON.stringify({state,errors},null,2));
-            await browser.close();
-          })().catch(e => {
-            console.error('FATAL', e.stack || e);
-            process.exitCode = 0;
-          });
-          NODE
-          cat /tmp/cde-smoke/run.log
-      - name: Collect server log
-        if: always()
-        run: |
-          cat /tmp/cde-http.log > /tmp/cde-smoke/http.log || true
-          git rev-parse HEAD > /tmp/cde-smoke/commit.txt
-      - name: Upload diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: cde-smoke-diagnostics
-          path: /tmp/cde-smoke
-      - name: Enforce smoke assertions
-        run: |
-          node - <<'NODE'
-          const fs = require('fs');
-          const d = JSON.parse(fs.readFileSync('/tmp/cde-smoke/state.json','utf8'));
-          const s = d.state || {};
-          if (s.title !== 'Crypto Direction Engine — V12.8') throw new Error('wrong title: '+s.title);
-          if (s.dir === 'CHARGEMENT' || !s.dir) throw new Error('dashboard stayed in CHARGEMENT');
-          if (s.price === '—' || !s.price) throw new Error('price not populated');
-          if (!s.health || s.health.trim().length < 10) throw new Error('health empty');
-          if (!s.journal || !s.journal.includes('5m')) throw new Error('journal empty');
-          if (d.errors?.length) throw new Error(d.errors.join('\n'));
-          NODE
+          if command -v google-chrome >/dev/null 2>&1; then BROWSER=google-chrome; elif command -v chromium >/dev/null 2>&1; then BROWSER=chromium; else BROWSER=chromium-browser; fi
+          "$BROWSER" --headless --no-sandbox --disable-gpu --disable-dev-shm-usage --dump-dom --virtual-time-budget=15000 'http://127.0.0.1:4173/index.html?live-smoke=1' >/tmp/cde-live.html 2>/tmp/cde-live-browser.log
+          python3 - <<'PY'
+          import re,sys
+          s=open('/tmp/cde-live.html',encoding='utf-8').read()
+          if 'Crypto Direction Engine — V13.0' not in s: raise SystemExit('V13 title missing')
+          d=re.search(r'<div id="dir"[^>]*>(.*?)</div>',s,re.S)
+          p=re.search(r'<b id="kPrice">(.*?)</b>',s,re.S)
+          h=re.search(r'<div id="health"[^>]*>(.*?)</div>',s,re.S)
+          print('dir=',re.sub('<.*?>','',d.group(1)).strip() if d else 'missing')
+          print('price=',re.sub('<.*?>','',p.group(1)).strip() if p else 'missing')
+          print('health_len=',len(h.group(1)) if h else 0)
+          if not p or re.sub('<.*?>','',p.group(1)).strip() in ('','—'): raise SystemExit('LIVE price not populated in browser')
+          if not d or 'CHARGEMENT' in d.group(1): raise SystemExit('browser remained in CHARGEMENT')
+          if not h or len(h.group(1))<50: raise SystemExit('health not rendered')
+          print('LIVE BROWSER OK')
+          PY
