@@ -64,7 +64,7 @@ let S={coin:'BTC',candles:[],book:null,trades:[],bTicker:null,bOi:null,bPrem:nul
 function loadStore(){try{return JSON.parse(localStorage.getItem('cde_v2_learning')||'{}')}catch{return{}}}
 function saveStore(){localStorage.setItem('cde_v2_learning',JSON.stringify(ST))}
 let ST=loadStore();
-function freshModel(){return{w:{structure:.30,flow:.22,l2:.18,derivatives:.12,cross:.12,pasr:.06},b:0,seen:0,brier:[],ll:[],hits:0}}
+function freshModel(){return{w:{structure:.26,flow:.20,l2:.16,derivatives:.11,cross:.10,absorption:.09,pasr:.08},b:0,seen:0,brier:[],ll:[],brierSum:0,llSum:0,hits:0}}
 function getModel(h,kind){ST.models??={};ST.models[h]??={full:freshModel(),base:freshModel()};return ST.models[h][kind]}
 function persist(){saveStore()}
 function ema(a,n){if(!a.length)return NaN;let e=a[0],k=2/(n+1);for(let i=1;i<a.length;i++)e=a[i]*k+e*(1-k);return e}
@@ -121,7 +121,7 @@ function pendingKey(){return'cde_v2_pending'}
 function getPending(){try{return JSON.parse(localStorage.getItem(pendingKey())||'[]')}catch{return[]}}
 function setPending(x){localStorage.setItem(pendingKey(),JSON.stringify(x))}
 function spawnForecast(h,f,p,plan){
- const ts=now(), arr=getPending();arr.push({id:ts+'-'+Math.random(),coin:S.coin,h:+h,ts,entry:S.hlPrice,plan,features:{...f},pLong:p.pLong,pShort:p.pShort,pNeutral:p.pNeutral,full:{score:p.full.score,v:p.full.v},base:{score:p.base.score,v:p.base.v}});
+ const ts=now(), arr=getPending();arr.push({id:ts+'-'+Math.random(),coin:S.coin,h:+h,ts,entry:Number.isFinite(plan.entry)?plan.entry:S.hlPrice,plan,features:{...f},pLong:p.pLong,pShort:p.pShort,pNeutral:p.pNeutral,full:{score:p.full.score,v:p.full.v},base:{score:p.base.score,v:p.base.v}});
  setPending(arr.filter(x=>now()-x.ts<7*24*60*60*1000));
 }
 function outcomeFrom(p,current){
@@ -136,21 +136,21 @@ function settle(){
   const hkey=String(p.h),mf=getModel(hkey,'full'),mb=getModel(hkey,'base');
   function update(m,keys,v,prob){
    const yy=y,err=yy-prob,lr=.035/(1+m.seen*.002);m.b+=lr*err;for(let i=0;i<keys.length;i++){let k=keys[i];m.w[k]=clamp((m.w[k]||0)+lr*err*v[i],-1.5,1.5)}m.seen++;
-   const br=(prob-yy)**2,ll=-Math.log(clamp(yy?prob:1-prob,1e-6,1));m.brier.push(br);m.ll.push(ll);if(m.brier.length>250)m.brier.shift();if(m.ll.length>250)m.ll.shift();if((prob>=.5)===(yy===1))m.hits++;
+   const br=(prob-yy)**2,ll=-Math.log(clamp(yy?prob:1-prob,1e-6,1));m.brierSum+=br;m.llSum+=ll;m.brier.push(br);m.ll.push(ll);if(m.brier.length>250)m.brier.shift();if(m.ll.length>250)m.ll.shift();if((prob>=.5)===(yy===1))m.hits++;
   }
-  update(mf,['structure','flow','l2','derivatives','cross','pasr'],p.full.v,p.pLong);
-  update(mb,['structure','flow','l2','derivatives','cross'],p.base.v,p.pLong);
+  update(mf,['structure','flow','l2','derivatives','cross','absorption','pasr'],p.full.v,p.pLong);
+  update(mb,['structure','flow','l2','derivatives','cross','absorption'],p.base.v,p.pLong);
  }
  setPending(keep);persist();
 }
-function metrics(h,kind){let m=getModel(String(h),kind);return{n:m.seen,b:m.brier.length?m.brier.reduce((a,b)=>a+b,0)/m.brier.length:null,ll:m.ll.length?m.ll.reduce((a,b)=>a+b,0)/m.ll.length:null,hit:m.seen?m.hits/m.seen:null}}
+function metrics(h,kind){let m=getModel(String(h),kind);return{n:m.seen,b:m.seen?m.brierSum/m.seen:null,ll:m.seen?m.llSum/m.seen:null,hit:m.seen?m.hits/m.seen:null}}
 function render(){
  const h=String($('h').value),f=S.features;if(!f)return;let p=combinedPrediction(h,f),plan=orderPlan(h,f,p),dom=Math.max(p.pLong,p.pShort);
  $('hz').textContent=h+'m';$('dir').textContent=plan.direction;$('dir').className='dir '+(plan.direction==='LONG'?'up':plan.direction==='SHORT'?'down':'neutral');$('prob').textContent=plan.direction==='NO TRADE'?'—':(dom*100).toFixed(0)+'%';$('pl').textContent=(100*p.pLong).toFixed(0)+'%';$('pn').textContent=(100*p.pNeutral).toFixed(0)+'%';$('ps').textContent=(100*p.pShort).toFixed(0)+'%';$('lb').style.width=100*p.pLong+'%';$('nb').style.width=100*p.pNeutral+'%';$('sb').style.width=100*p.pShort+'%';$('lb').style.background='var(--up)';$('nb').style.background='var(--neu)';$('sb').style.background='var(--down)';
  $('reg').textContent='Régime '+(f.dis>.57?'TRANSITION':Math.abs(f.structure)>.45?'TREND':Math.abs(f.flow)>.45?'FLOW SHOCK':'RANGE / MIXTE')+' · qualité '+f.quality+'/100';$('quality').textContent='DQ '+f.quality;$('score').textContent='score '+p.full.score.toFixed(3);
  $('orderState').textContent=plan.direction==='NO TRADE'?'ABSTAIN':'PRÊT À PLACER';$('act').textContent=plan.direction==='LONG'?'BUY':plan.direction==='SHORT'?'SELL':'NO TRADE';$('entry').textContent=Number.isFinite(plan.entry)?plan.entry.toLocaleString('fr-FR',{maximumFractionDigits:2}):'—';$('sl').textContent=Number.isFinite(plan.sl)?plan.sl.toLocaleString('fr-FR',{maximumFractionDigits:2}):'—';$('tp').textContent=Number.isFinite(plan.tp)?plan.tp.toLocaleString('fr-FR',{maximumFractionDigits:2}):'—';$('rr').textContent=Number.isFinite(plan.tp)?'1:'+plan.rr.toFixed(2):'—';$('orderWhy').textContent=plan.reason;
- const why=[['Structure',f.structure],['Order flow',f.flow],['L2',f.l2],['Dérivés',f.derivatives],['Cross-venue',f.cross],['PASR',f.pasr]].filter(x=>Number.isFinite(x[1])).sort((a,b)=>Math.abs(b[1])-Math.abs(a[1])).slice(0,6);$('why').innerHTML=why.map(x=>'<div class="cause"><span>'+x[0]+'</span><b class="'+(x[1]>0?'up':x[1]<0?'down':'neutral')+'">'+(x[1]>0?'+':'')+x[1].toFixed(3)+'</b></div>').join('');
- const names={structure:'Structure',flow:'Order flow',l2:'L2',derivatives:'Dérivés',cross:'Cross-venue',pasr:'PASR C4'};$('matrix').innerHTML=why.map(x=>'<div class="ev"><div class="evtop"><b>'+x[0]+'</b><span class="badge '+(x[1]>0?'up':x[1]<0?'down':'')+'">'+(x[1]>0?'+':'')+x[1].toFixed(3)+'</span></div><div class="tiny">'+(Math.abs(x[1])<.15?'faible':Math.abs(x[1])<.4?'modéré':'fort')+' · observé/dérivé</div></div>').join('');
+ const why=[['Structure',f.structure],['Order flow',f.flow],['L2',f.l2],['Dérivés',f.derivatives],['Cross-venue',f.cross],['Absorption',f.absorption],['PASR',f.pasr]].filter(x=>Number.isFinite(x[1])).sort((a,b)=>Math.abs(b[1])-Math.abs(a[1])).slice(0,6);$('why').innerHTML=why.map(x=>'<div class="cause"><span>'+x[0]+'</span><b class="'+(x[1]>0?'up':x[1]<0?'down':'neutral')+'">'+(x[1]>0?'+':'')+x[1].toFixed(3)+'</b></div>').join('');
+ const names={structure:'Structure',flow:'Order flow',l2:'L2',derivatives:'Dérivés',cross:'Cross-venue',absorption:'Absorption',pasr:'PASR C4'};$('matrix').innerHTML=why.map(x=>'<div class="ev"><div class="evtop"><b>'+x[0]+'</b><span class="badge '+(x[1]>0?'up':x[1]<0?'down':'')+'">'+(x[1]>0?'+':'')+x[1].toFixed(3)+'</span></div><div class="tiny">'+(Math.abs(x[1])<.15?'faible':Math.abs(x[1])<.4?'modéré':'fort')+' · observé/dérivé</div></div>').join('');
  const d=depth(S.book)||{};$('book').innerHTML='<div><div class="line"><span>Bid</span><b>'+ (Number.isFinite(d.bid)?d.bid:'—')+'</b></div><div class="line"><span>Bid size</span><b>'+ (Number.isFinite(d.bs)?d.bs.toFixed(3):'—')+'</b></div></div><div><div class="line"><span>Ask</span><b>'+ (Number.isFinite(d.ask)?d.ask:'—')+'</b></div><div class="line"><span>Ask size</span><b>'+ (Number.isFinite(d.ss)?d.ss.toFixed(3):'—')+'</b></div></div><div style="grid-column:1/-1"><div class="line"><span>Imbalance</span><b>'+ (Number.isFinite(d.imb)?(100*d.imb).toFixed(2)+'%':'—')+'</b></div><div class="line"><span>Spread</span><b>'+ (Number.isFinite(d.spread)?(100*d.spread).toFixed(4)+'%':'—')+'</b></div></div>';
  $('price').textContent=Number.isFinite(S.hlPrice)?S.hlPrice.toLocaleString('fr-FR',{maximumFractionDigits:2}):'—';$('bp').textContent=Number.isFinite(S.bTicker)?S.bTicker.toLocaleString('fr-FR',{maximumFractionDigits:2}):'—';$('oi').textContent=Number.isFinite(S.hlOi)?S.hlOi.toLocaleString('fr-FR',{maximumFractionDigits:2}):'—';$('fund').textContent=Number.isFinite(S.hlFunding)?(100*S.hlFunding).toFixed(4)+'%':'—';
  const m=metrics(h,'full'),mb=metrics(h,'base');$('samples').textContent=m.n;$('pending').textContent=getPending().filter(x=>x.coin===S.coin).length;$('brier').textContent=m.b==null?'—':m.b.toFixed(4);$('ll').textContent=m.ll==null?'—':m.ll.toFixed(4);$('hit').textContent=m.hit==null?'—':(100*m.hit).toFixed(1)+'%';$('learn').textContent=m.n<30?'LEARNING':m.n<120?'CALIBRATING':'ADAPTIVE';
