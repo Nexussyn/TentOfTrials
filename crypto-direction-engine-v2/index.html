@@ -99,7 +99,7 @@ function features(){
  const quality=Math.round(clamp(100*(.62*qn/9+.28*(1-clamp(dis,0,1))+.10*(S.book?1:0)),0,100));
  return{...blocks,quality,dis,atr:atr(c.slice(-120)),c4:c4.z};
 }
-function featureVector(f,includePasr){return [f.structure,f.flow,f.l2,f.derivatives,f.cross,...(includePasr?[f.pasr]:[])].map(x=>Number.isFinite(x)?x:0)}
+function featureVector(f,includePasr){return [f.structure,f.flow,f.l2,f.derivatives,f.cross,f.absorption,...(includePasr?[f.pasr]:[])].map(x=>Number.isFinite(x)?x:0)}
 function scoreModel(f,h,kind){let m=getModel(h,kind),v=featureVector(f,kind==='full'),keys=kind==='full'?['structure','flow','l2','derivatives','cross','pasr']:['structure','flow','l2','derivatives','cross'];let s=m.b;for(let i=0;i<keys.length;i++)s+=(m.w[keys[i]]||0)*v[i];return{s,v,model:m,keys}}
 function predict(h,f,kind){
  const g=scoreModel(f,h,kind), z=sig(g.s), rawLong=z, pN=clamp(.18+f.dis*.44+(100-f.quality)*.002,.18,.68), dirMass=1-pN;
@@ -121,7 +121,7 @@ function pendingKey(){return'cde_v2_pending'}
 function getPending(){try{return JSON.parse(localStorage.getItem(pendingKey())||'[]')}catch{return[]}}
 function setPending(x){localStorage.setItem(pendingKey(),JSON.stringify(x))}
 function spawnForecast(h,f,p,plan){
- const ts=now(), arr=getPending();arr.push({id:ts+'-'+Math.random(),coin:S.coin,h:+h,ts,entry:Number.isFinite(plan.entry)?plan.entry:S.hlPrice,plan,features:{...f},pLong:p.pLong,pShort:p.pShort,pNeutral:p.pNeutral,full:{score:p.full.score,v:p.full.v},base:{score:p.base.score,v:p.base.v}});
+ const ts=now(), arr=getPending();arr.push({id:ts+'-'+Math.random(),coin:S.coin,h:+h,ts,entry:Number.isFinite(plan.entry)?plan.entry:S.hlPrice,plan,features:{...f},pLong:p.pLong,pShort:p.pShort,pNeutral:p.pNeutral,full:{score:p.full.score,v:p.full.v,pLong:p.full.pLong},base:{score:p.base.score,v:p.base.v,pLong:p.base.pLong}});
  setPending(arr.filter(x=>now()-x.ts<7*24*60*60*1000));
 }
 function outcomeFrom(p,current){
@@ -138,8 +138,8 @@ function settle(){
    const yy=y,err=yy-prob,lr=.035/(1+m.seen*.002);m.b+=lr*err;for(let i=0;i<keys.length;i++){let k=keys[i];m.w[k]=clamp((m.w[k]||0)+lr*err*v[i],-1.5,1.5)}m.seen++;
    const br=(prob-yy)**2,ll=-Math.log(clamp(yy?prob:1-prob,1e-6,1));m.brierSum+=br;m.llSum+=ll;m.brier.push(br);m.ll.push(ll);if(m.brier.length>250)m.brier.shift();if(m.ll.length>250)m.ll.shift();if((prob>=.5)===(yy===1))m.hits++;
   }
-  update(mf,['structure','flow','l2','derivatives','cross','absorption','pasr'],p.full.v,p.pLong);
-  update(mb,['structure','flow','l2','derivatives','cross','absorption'],p.base.v,p.pLong);
+  update(mf,['structure','flow','l2','derivatives','cross','absorption','pasr'],p.full.v,p.full.pLong/(p.full.pLong+p.full.pShort));
+  update(mb,['structure','flow','l2','derivatives','cross','absorption'],p.base.v,p.base.pLong/(p.base.pLong+p.base.pShort));
  }
  setPending(keep);persist();
 }
