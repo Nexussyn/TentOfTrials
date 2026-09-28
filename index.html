@@ -547,39 +547,67 @@ function paperStats(h){
 }
 function paperPendingExists(h){
   var key=S.coin+'_'+h,a=DB.pending[key]||[];
-  return a.some(function(x){return x.paper===true});
+  return a.some(function(x){return x.paper===true&&!x.paperResolved});
 }
-function simulatePaperTrade(h,p,path){
-  if(!p||!p.paper||p.paperResolved)return;
-  var ledger=paperState(h),items=path&&path.items||[];if(!items.length)return;
-  var dir=p.direction==='LONG'?1:-1,entry=p.entry,sl=p.sl,tp=p.tp;
-  if(!finite(entry)||!finite(sl)||!finite(tp))return;
-  var exit=null,reason='HORIZON',exitTs=items[items.length-1].t;
-  for(var i=0;i<items.length;i++){
-    var q=items[i],hi=path.mode==='TICK'?q.p:q.h,lo=path.mode==='TICK'?q.p:q.l;
-    var hitSL=dir>0?lo<=sl:hi>=sl,hitTP=dir>0?hi>=tp:lo<=tp;
-    if(hitSL||hitTP){
-      // Conservative: when both are inside the same observation, assume SL first.
-      if(hitSL){exit=sl;reason='SL'}else{exit=tp;reason='TP'}
-      exitTs=q.t;break;
+function markPaperResolved(h,position,exit,reason,exitTs){
+  var key=S.coin+'_'+h,a=DB.pending[key]||[];
+  for(var i=0;i<a.length;i++){
+    if(a[i].paper&&a[i].ts===position.ts){
+      a[i].paperResolved=true;
+      a[i].paperExit=exit;
+      a[i].paperReason=reason;
+      a[i].paperExitTs=exitTs||now();
+      break;
     }
   }
-  if(!finite(exit)){var ql=items[items.length-1];exit=path.mode==='TICK'?ql.p:ql.c;}
-  var size=p.size;if(!finite(size)||size<=0){
-    var rd=Math.abs(entry-sl),riskCash=ledger.capital*(p.paperRisk||S.risk)/100;size=rd>0?riskCash/rd:0;
-  }
-  if(size<=0)return;
-  var gross=size*(exit-entry)*dir;
-  var feePerSide=p.paperFee!=null?p.paperFee:S.fee;
-  var fees=(Math.abs(size*entry)+Math.abs(size*exit))*(feePerSide/10000);
+}
+function settlePaperPosition(h,position,exit,reason,exitTs){
+  if(!position||!finite(exit)||position.closed)return false;
+  var ledger=paperState(h),feePerSide=position.paperFee!=null?position.paperFee:S.fee;
+  var dir=position.direction==='LONG'?1:-1;
+  var gross=position.size*(exit-position.entry)*dir;
+  var fees=(Math.abs(position.size*position.entry)+Math.abs(position.size*exit))*(feePerSide/10000);
   var net=gross-fees;
-  ledger.capital+=net;ledger.peak=Math.max(ledger.peak,ledger.capital);
-  var dd=ledger.peak>0?1-ledger.capital/ledger.peak:0;ledger.maxDD=Math.max(ledger.maxDD,dd);ledger.trades++;ledger.fees+=fees;
+  ledger.capital+=net;
+  ledger.peak=Math.max(ledger.peak,ledger.capital);
+  var dd=ledger.peak>0?1-ledger.capital/ledger.peak:0;
+  ledger.maxDD=Math.max(ledger.maxDD,dd);
+  ledger.trades++;
+  ledger.fees+=fees;
   if(net>=0)ledger.wins++;else ledger.losses++;
-  ledger.log.push({ts:p.ts,exitTs:exitTs,direction:p.direction,entry:entry,exit:exit,sl:sl,tp:tp,size:size,gross:gross,fees:fees,net:net,reason:reason});
+  ledger.log.push({ts:position.ts,exitTs:exitTs||now(),direction:position.direction,entry:position.entry,exit:exit,sl:position.sl,tp:position.tp,size:position.size,gross:gross,fees:fees,net:net,reason:reason});
   ledger.log=ledger.log.slice(-500);
-  p.paperResolved=true;p.paperExit=exit;p.paperReason=reason;p.paperNet=net;DB.paper[S.coin+'_'+h]=ledger;
+  position.closed=true;
+  position.exit=exit;
+  position.reason=reason;
+  markPaperResolved(h,position,exit,reason,exitTs||now());
+  if(ledger.position&&ledger.position.ts===position.ts)ledger.position=null;
+  DB.paper[S.coin+'_'+h]=ledger;
   save();
+  return true;
+}
+function updatePaperPositions(){
+  for(var hi=0;hi<H.length;hi++){
+    var h=H[hi],ledger=paperState(h),pos=ledger.position;
+    if(!pos||pos.closed)continue;
+    var dir=pos.direction==='LONG'?1:-1;
+    var ticks=S.tape.filter(function(x){return x.t>=(pos.lastTs||pos.ts)&&finite(x.p)}).sort(function(a,b){return a.t-b.t});
+    var closed=false;
+    for(var i=0;i<ticks.length;i++){
+      var q=ticks[i],hitSL=dir>0?q.p<=pos.sl:q.p>=pos.sl,hitTP=dir>0?q.p>=pos.tp:q.p<=pos.tp;
+      pos.lastTs=q.t;
+      if(hitSL||hitTP){
+        settlePaperPosition(h,pos,hitSL?pos.sl:pos.tp,hitSL?'SL':'TP',q.t);
+        closed=true;break;
+      }
+    }
+    if(!closed&&finite(S.hl.price)){
+      var t=now(),hitSL2=dir>0?S.hl.price<=pos.sl:S.hl.price>=pos.sl,hitTP2=dir>0?S.hl.price>=pos.tp:S.hl.price<=pos.tp;
+      if(hitSL2||hitTP2)settlePaperPosition(h,pos,hitSL2?pos.sl:pos.tp,hitSL2?'SL':'TP',t);
+      else pos.lastTs=t;
+    }
+    if(!closed&&ledger.position){ledger.position=pos;DB.paper[S.coin+'_'+h]=ledger}
+  }
 }
 function targetThreshold(price,atr1m,h){
   if(!finite(price)||price<=0)return .002;
@@ -590,7 +618,6 @@ function targetThreshold(price,atr1m,h){
 function recordForecast(h,f,m,pl){
   var key=S.coin+'_'+h,arr=DB.pending[key]||[],pstate=paperState(h);
   DB.pending[key]=arr;
-  // Every forecast is logged for OOS. Only an actionable forecast can create a paper position.
   var actionable=(pl.direction==='LONG'||pl.direction==='SHORT')&&finite(pl.entry)&&finite(pl.sl)&&finite(pl.tp)&&!pstate.position&&!paperPendingExists(h);
   var rec={ts:now(),h:h,coin:S.coin,p0:S.hl.price,paperCapital:S.capital,paperRisk:S.risk,paperFee:S.fee,targetThr:targetThreshold(S.hl.price,f.atr,h),
     pBase:m.base.p.slice(),pFull:m.full.p.slice(),vBase:m.base.v.slice(),vFull:m.full.v.slice(),candidate:pl.candidate,entry:finite(pl.entry)?pl.entry:S.hl.price,
@@ -598,10 +625,14 @@ function recordForecast(h,f,m,pl){
   if(actionable){
     var riskDist=Math.abs(pl.entry-pl.sl),riskCash=pstate.capital*(rec.paperRisk)/100,feePerUnit=(finite(pl.entry)&&finite(pl.sl)?(Math.abs(pl.entry)+Math.abs(pl.sl))*(rec.paperFee/10000):NaN),sz=riskDist>0&&finite(feePerUnit)?riskCash/(riskDist+feePerUnit):NaN;
     if(finite(sz)&&sz>0){
-      rec.paper=true;rec.size=sz;pstate.position={ts:rec.ts,direction:rec.direction,entry:rec.entry,sl:rec.sl,tp:rec.tp,size:sz};rec.paperRisk=S.risk;rec.paperFee=S.fee;save();
+      rec.paper=true;rec.size=sz;
+      pstate.position={ts:rec.ts,direction:rec.direction,entry:rec.entry,sl:rec.sl,tp:rec.tp,size:sz,paperFee:rec.paperFee,lastTs:rec.ts,closed:false};
+      save();
     }
   }
-  DB.pending[key].push(rec);var maxPending=Math.max(300,Math.min(5000,Math.ceil(h*1.5)));DB.pending[key]=DB.pending[key].slice(-maxPending);save();
+  DB.pending[key].push(rec);
+  var maxPending=Math.max(300,Math.min(5000,Math.ceil(h*1.5)));
+  DB.pending[key]=DB.pending[key].slice(-maxPending);save();
 }
 function localPath(t0,h){
   var due=t0+h*60000,tick=S.tape.filter(function(x){return x.t>=t0-2000&&x.t<=due+2000&&finite(x.p)});
@@ -702,8 +733,8 @@ async function resolve(){
           DB.obs[key]=DB.obs[key].slice(-500);
           if(p.paper){
             learnGrid(h,p,path);
-            simulatePaperTrade(h,p,path);
-            var led=paperState(h);led.position=null;DB.paper[key]=led;
+            var led=paperState(h);
+            if(led.position&&led.position.ts===p.ts)settlePaperPosition(h,led.position,at.p,'HORIZON',at.t);
           }
         }catch(e){
           diagError('RESOLVE_'+h+'_'+i,e);
@@ -940,7 +971,7 @@ async function boot(){
     setInterval(function(){
       if(now()-S.lastRest>15000)restSync().catch(function(e){diagError('REST_LOOP',e)});
       restSpot();
-      resolve().catch(function(e){diagError('RESOLVE',e)});
+      updatePaperPositions();resolve().catch(function(e){diagError('RESOLVE',e)});
       try{dashboard()}catch(e){diagError('RENDER_LOOP',e)}
     },5000);
     setInterval(function(){
