@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Crypto Direction Engine — V13.0</title>
+<title>Crypto Direction Engine — V13.2</title>
 <style>
 :root{--bg:#061016;--p:#0c1a22;--p2:#09161d;--l:#243843;--t:#edf4f7;--m:#8ea3ad;--u:#43d19d;--d:#ff7082;--n:#f0bf55;--c:#67d7ef}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 15% 0,#122a32,#061016 42%,#050b0f);color:var(--t);font:14px/1.4 system-ui,-apple-system,Segoe UI,sans-serif}
@@ -32,7 +32,7 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
 <body>
 <header class="top">
   <div>
-    <div class="brand">CRYPTO DIRECTION ENGINE · V13.0</div>
+    <div class="brand">CRYPTO DIRECTION ENGINE · V13.2</div>
     <div class="tag">Hyperliquid primaire · Binance cross-venue · self-evaluating · persistance double · OOS résoluble après fermeture · aucune exécution réelle</div>
   </div>
   <div class="ctrl">
@@ -569,12 +569,18 @@ function simulatePaperTrade(h,p,path){
   p.paperResolved=true;p.paperExit=exit;p.paperReason=reason;p.paperNet=net;DB.paper[S.coin+'_'+h]=ledger;
   save();
 }
+function targetThreshold(price,atr1m,h){
+  if(!finite(price)||price<=0)return .002;
+  var vol=finite(atr1m)&&atr1m>0?atr1m/price:.0025;
+  var scaled=vol*Math.sqrt(Math.max(1,h))*0.65;
+  return clamp(scaled,.0015,.06);
+}
 function recordForecast(h,f,m,pl){
   var key=S.coin+'_'+h,arr=DB.pending[key]||[],pstate=paperState(h);
   DB.pending[key]=arr;
   // Every forecast is logged for OOS. Only an actionable forecast can create a paper position.
   var actionable=(pl.direction==='LONG'||pl.direction==='SHORT')&&finite(pl.entry)&&finite(pl.sl)&&finite(pl.tp)&&!pstate.position&&!paperPendingExists(h);
-  var rec={ts:now(),h:h,coin:S.coin,p0:S.hl.price,paperCapital:S.capital,paperRisk:S.risk,paperFee:S.fee,targetThr:clamp((f.atr||S.hl.price*.0025)/S.hl.price*.45,.0004,.01),
+  var rec={ts:now(),h:h,coin:S.coin,p0:S.hl.price,paperCapital:S.capital,paperRisk:S.risk,paperFee:S.fee,targetThr:targetThreshold(S.hl.price,f.atr,h),
     pBase:m.base.p.slice(),pFull:m.full.p.slice(),vBase:m.base.v.slice(),vFull:m.full.v.slice(),candidate:pl.candidate,entry:finite(pl.entry)?pl.entry:S.hl.price,
     direction:pl.direction,dir:pl.direction,atr:f.atr,pair:pl.pair||null,sl:pl.sl,tp:pl.tp,rr:pl.rr,paper:false};
   if(actionable){
@@ -583,7 +589,7 @@ function recordForecast(h,f,m,pl){
       rec.paper=true;rec.size=sz;pstate.position={ts:rec.ts,direction:rec.direction,entry:rec.entry,sl:rec.sl,tp:rec.tp,size:sz};rec.paperRisk=S.risk;rec.paperFee=S.fee;save();
     }
   }
-  DB.pending[key].push(rec);DB.pending[key]=DB.pending[key].slice(-300);save();
+  DB.pending[key].push(rec);var maxPending=Math.max(300,Math.min(5000,Math.ceil(h*1.5)));DB.pending[key]=DB.pending[key].slice(-maxPending);save();
 }
 function localPath(t0,h){
   var due=t0+h*60000,tick=S.tape.filter(function(x){return x.t>=t0-2000&&x.t<=due+2000&&finite(x.p)});
@@ -654,7 +660,7 @@ async function resolve(){
         if(now()<due-1500){keep.push(p);continue}
         var path=await fetchPath(p.ts,h),at=path&&pathPriceAt(p.ts,h,path);
         if(!at){if(now()-p.ts>7*86400000)DB.expired=(DB.expired||0)+1;else keep.push(p);continue}
-        var r=at.p/p.p0-1,target=labelFromReturn(r,p.targetThr),base=model(h,'base'),full=model(h,'full');
+        var r=at.p/p.p0-1,target=labelFromReturn(r,finite(p.targetThr)?p.targetThr:targetThreshold(p.p0,p.atr,h)),base=model(h,'base'),full=model(h,'full');
         var baseLog=forecastLogits(base,p.vBase),fullLog=forecastLogits(full,p.vFull);
         var prB=sigmoid(baseLog.map(function(x){return x/(base.temp||1)})),prF=sigmoid(fullLog.map(function(x){return x/(full.temp||1)}));
         base.obs.push({logits:baseLog,target:target,source:'LIVE'});full.obs.push({logits:fullLog,target:target,source:'LIVE'});base.obs=base.obs.slice(-300);full.obs=full.obs.slice(-300);
@@ -756,7 +762,7 @@ function restSpot(){
 }
 async function warmStart(){
   var key=S.coin,meta=DB.pretrain[key]||{}; meta.h=meta.h||{};
-  if(H.every(function(h){return meta.h[h]&&meta.h[h].done})){ $('learningNote').textContent='PRETRAIN déjà présent pour '+S.coin+' : le Warm-start ne réinitialise plus le live. Build V13.0.'; $('modeBadge').textContent='LIVE'; dashboard(); return; }
+  if(H.every(function(h){return meta.h[h]&&meta.h[h].done})){ $('learningNote').textContent='PRETRAIN déjà présent pour '+S.coin+' : le Warm-start ne réinitialise plus le live. Build V13.2.'; $('modeBadge').textContent='LIVE'; dashboard(); return; }
   $('modeBadge').textContent='PRETRAIN';$('learningNote').textContent='Warm-start en cours : historique 1m prix sur la fenêtre maximale publique d’environ 3,4 jours. Le L2 historique complet n’est pas simulé.';
   meta.started=meta.started||now();DB.pretrain[key]=meta;save();
   for(var hi=0;hi<H.length;hi++){
@@ -767,7 +773,7 @@ async function warmStart(){
       var bm=model(h,'base'),fm=model(h,'full'),step=2;
       for(var i=80;i<bars.length-h;i+=step){
         var c=bars.slice(0,i+1),clo=c.map(function(q){return q.c}),f={r1:ret(clo,1),r5:ret(clo,5),r15:ret(clo,15),r60:ret(clo,60),ema:ema(clo.slice(-180),9)/ema(clo.slice(-180),21)-1,l2:NaN,micro:NaN,flow:NaN,absorption:NaN,funding:NaN,basis:NaN,spotPerp:NaN,doi:NaN,liq:NaN,pasr:NaN,atr:atr(c.slice(-120))};
-        var r=bars[i+h].c/bars[i].c-1,thr=clamp((f.atr||bars[i].c*.0025)/bars[i].c*.45,.0004,.01),target=labelFromReturn(r,thr),vb=vec(f,false),zb=forecastLogits(bm,vb),pb=sigmoid(zb),vf=vec(f,true),zf=forecastLogits(fm,vf),pf=sigmoid(zf);
+        var r=bars[i+h].c/bars[i].c-1,thr=targetThreshold(bars[i].c,f.atr,h),target=labelFromReturn(r,thr),vb=vec(f,false),zb=forecastLogits(bm,vb),pb=sigmoid(zb),vf=vec(f,true),zf=forecastLogits(fm,vf),pf=sigmoid(zf);
         update(bm,target,pb,vb,false);update(fm,target,pf,vf,false);bm.obs.push({logits:zb,target:target,source:'PRETRAIN'});fm.obs.push({logits:zf,target:target,source:'PRETRAIN'});
         meta.n++;
       }
@@ -871,7 +877,7 @@ function assertSelfTest(){
   if($('journal').textContent.indexOf('1j')<0)throw Error('1j not rendered');
   if($('capitalCards').textContent.indexOf('1000')<0)throw Error('capital cards not rendered');
   var b=$('kPrice').textContent;if(!b||b==='—')throw Error('price KPI not rendered');
-  var f=feats(),m=mixed(S.h,f),pl=orderPlan(S.h,f,m);if(!pl||!pl.candidate)throw Error('order plan did not compute');
+  var f=feats(),m=mixed(S.h,f),pl=orderPlan(S.h,f,m);if(!pl||!pl.candidate)throw Error('order plan did not compute');if(!(targetThreshold(83250,45,1440)>=.0015))throw Error('horizon threshold failed');if(!paperState(5)||!paperStats(5))throw Error('paper ledger unavailable');
   var el=$('bootBanner');el.style.display='block';el.className='panel note diag selftest';el.textContent='CDE SELFTEST PASS · UI + moteur + paper ledger déterministes OK · aucune connexion réseau requise.';
 }
 async function boot(){
