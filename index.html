@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Crypto Direction Engine — V12.7</title>
+<title>Crypto Direction Engine — V12.8</title>
 <style>
 :root{--bg:#061016;--p:#0c1a22;--p2:#09161d;--l:#243843;--t:#edf4f7;--m:#8ea3ad;--u:#43d19d;--d:#ff7082;--n:#f0bf55;--c:#67d7ef}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 15% 0,#122a32,#061016 42%,#050b0f);color:var(--t);font:14px/1.4 system-ui,-apple-system,Segoe UI,sans-serif}
@@ -32,7 +32,7 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
 <body>
 <header class="top">
   <div>
-    <div class="brand">CRYPTO DIRECTION ENGINE · V12.7</div>
+    <div class="brand">CRYPTO DIRECTION ENGINE · V12.8</div>
     <div class="tag">Hyperliquid primaire · Binance cross-venue · self-evaluating · persistance double · OOS résoluble après fermeture · aucune exécution réelle</div>
   </div>
   <div class="ctrl">
@@ -225,6 +225,8 @@ var clamp=function(x,a,b){return Math.max(a,Math.min(b,x))};
 var finite=function(x){return Number.isFinite(x)};
 var pct=function(x,d){return finite(x)?(100*x).toFixed(d==null?1:d)+'%':'—'};
 var nfmt=function(x,d){return finite(x)?Number(x).toLocaleString('fr-FR',{maximumFractionDigits:d==null?2:d}):'—'};
+function withTimeout(p,ms,label){return Promise.race([p,new Promise(function(_,rej){setTimeout(function(){rej(new Error((label||'operation')+' timeout'))},ms)})])}
+async function fetchJSON(url,opt,ms){var ctrl=window.AbortController?new AbortController():null,opt2=opt||{};if(ctrl)opt2.signal=ctrl.signal;var timer=setTimeout(function(){try{if(ctrl)ctrl.abort()}catch(e){}},ms||7000);try{var r=await fetch(url,opt2);if(!r.ok)throw new Error('HTTP '+r.status);return await r.json()}finally{clearTimeout(timer)}}
 
 function blankDB(){return{models:{},pending:{},obs:{},grid:{},pretrain:{},pasr:{},paper:{},updatedAt:0}}
 function normalizeDB(d){
@@ -607,25 +609,23 @@ function pasrVerdict(h){
   return'INCONCLUSIF';
 }
 async function hl(body){
-  var r=await fetch(HLAPI,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
-  if(!r.ok)throw Error('HL '+r.status);return r.json();
+  return fetchJSON(HLAPI,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)},7000);
 }
 async function restSync(){
-  var t=now();
-  try{
-    var out=await Promise.all([
-      hl({type:'candleSnapshot',req:{coin:S.coin,interval:'1m',startTime:t-3*86400000,endTime:t}}),
-      hl({type:'metaAndAssetCtxs'}),
-      fetch(BNAPI+'/fapi/v1/openInterest?symbol='+S.coin+'USDT').then(function(r){return r.json()}),
-      fetch(BNAPI+'/fapi/v1/premiumIndex?symbol='+S.coin+'USDT').then(function(r){return r.json()})
-    ]);
-    S.hl.candles=(out[0]||[]).map(function(q){return{t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v}}).sort(function(a,b){return a.t-b.t}).slice(-5000);
-    var idx=out[1]&&out[1][0]&&out[1][0].universe?out[1][0].universe.findIndex(function(q){return q.name===S.coin}):-1;
-    if(idx>=0&&out[1][1]&&out[1][1][idx]){S.hl.oi=+out[1][1][idx].openInterest;S.hl.funding=+out[1][1][idx].funding;S.hl.lastCtx=t}
-    if(out[2]&&out[2].openInterest){S.bn.oi=+out[2].openInterest;S.bn.oiHist.push({t:t,v:S.bn.oi});S.bn.oiHist=S.bn.oiHist.slice(-1000)}
-    if(out[3]&&out[3].lastFundingRate!=null)S.bn.funding=+out[3].lastFundingRate;
-    S.feed.HL_CANDLE='OK';S.feed.HL_CTX='OK';S.feed.BN_REST='OK';S.lastRest=t;S.bn.lastRest=t;
-  }catch(e){S.feed.BN_REST='STALE'}
+  var t=now(),results=[];
+  var jobs=[
+    {name:'HL_CANDLE',p:hl({type:'candleSnapshot',req:{coin:S.coin,interval:'1m',startTime:t-3*86400000,endTime:t}})},
+    {name:'HL_CTX',p:hl({type:'metaAndAssetCtxs'})},
+    {name:'BN_OI',p:fetchJSON(BNAPI+'/fapi/v1/openInterest?symbol='+S.coin+'USDT',{},6000)},
+    {name:'BN_PREM',p:fetchJSON(BNAPI+'/fapi/v1/premiumIndex?symbol='+S.coin+'USDT',{},6000)}
+  ];
+  var settled=await Promise.all(jobs.map(function(j){return Promise.resolve(j.p).then(function(v){return{name:j.name,ok:true,v:v}}).catch(function(e){return{name:j.name,ok:false,e:e}})}));
+  var hc=settled.find(function(x){return x.name==='HL_CANDLE'}),ctx=settled.find(function(x){return x.name==='HL_CTX'}),boi=settled.find(function(x){return x.name==='BN_OI'}),bp=settled.find(function(x){return x.name==='BN_PREM'});
+  if(hc&&hc.ok){S.hl.candles=(hc.v||[]).map(function(q){return{t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v}}).sort(function(a,b){return a.t-b.t}).slice(-5000);S.feed.HL_CANDLE='OK'}else S.feed.HL_CANDLE='STALE';
+  if(ctx&&ctx.ok){var u=ctx.v&&ctx.v[0]&&ctx.v[0].universe||[],idx=u.findIndex(function(q){return q.name===S.coin});if(idx>=0&&ctx.v[1]&&ctx.v[1][idx]){S.hl.oi=+ctx.v[1][idx].openInterest;S.hl.funding=+ctx.v[1][idx].funding;S.hl.lastCtx=t;S.feed.HL_CTX='OK'}else S.feed.HL_CTX='STALE'}else S.feed.HL_CTX='STALE';
+  if(boi&&boi.ok&&boi.v&&boi.v.openInterest){S.bn.oi=+boi.v.openInterest;S.bn.oiHist.push({t:t,v:S.bn.oi});S.bn.oiHist=S.bn.oiHist.slice(-1000)}
+  if(bp&&bp.ok&&bp.v&&bp.v.lastFundingRate!=null)S.bn.funding=+bp.v.lastFundingRate;
+  S.feed.BN_REST=(boi&&boi.ok)||(bp&&bp.ok)?'OK':'STALE';S.lastRest=t;S.bn.lastRest=t;return settled;
 }
 function reconnectHL(){
   var attempt=0,timer=null;
@@ -673,16 +673,16 @@ function reconnectBN(){
   go();
 }
 function restSpot(){
-  fetch(BN_SPOT+'?symbol='+S.coin+'USDT&limit=1000').then(function(r){return r.ok?r.json():[]}).then(function(a){
+  fetchJSON(BN_SPOT+'?symbol='+S.coin+'USDT&limit=1000',{},6000).then(function(a){
     var map={};for(var j=0;j<S.bn.spot.length;j++)if(S.bn.spot[j].id!=null)map[S.bn.spot[j].id]=S.bn.spot[j];
     for(var i=0;i<a.length;i++){var q=a[i],id=q.a!=null?q.a:(String(q.T)+'_'+String(q.p)+'_'+String(q.q));map[id]={id:id,time:q.T||now(),side:q.m?'S':'B',sz:+q.q}}
-    S.bn.spot=Object.keys(map).map(function(k){return map[k]}).sort(function(x,y){return x.time-y.time}).slice(-5000);
+    S.bn.spot=Object.values(map).sort(function(x,y){return x.time-y.time}).slice(-5000);
     S.bn.lastSpot=now();S.feed.BN_SPOT='OK';
   }).catch(function(){S.feed.BN_SPOT='STALE'});
 }
 async function warmStart(){
   var key=S.coin,meta=DB.pretrain[key]||{}; meta.h=meta.h||{};
-  if(H.every(function(h){return meta.h[h]&&meta.h[h].done})){ $('learningNote').textContent='PRETRAIN déjà présent pour '+S.coin+' : le Warm-start ne réinitialise plus le live. Build V12.7.'; $('modeBadge').textContent='LIVE'; dashboard(); return; }
+  if(H.every(function(h){return meta.h[h]&&meta.h[h].done})){ $('learningNote').textContent='PRETRAIN déjà présent pour '+S.coin+' : le Warm-start ne réinitialise plus le live. Build V12.8.'; $('modeBadge').textContent='LIVE'; dashboard(); return; }
   $('modeBadge').textContent='PRETRAIN';$('learningNote').textContent='Warm-start en cours : historique 1m prix sur la fenêtre maximale publique d’environ 3,4 jours. Le L2 historique complet n’est pas simulé.';
   meta.started=meta.started||now();DB.pretrain[key]=meta;save();
   for(var hi=0;hi<H.length;hi++){
@@ -778,12 +778,16 @@ function dashboard(){
   $('chartInfo').textContent='HL '+nfmt(S.hl.price)+' · BN '+nfmt(S.bn.price);try{renderCapital()}catch(e){} try{renderHealth()}catch(e){} try{journal()}catch(e){} $('audit').textContent='CAPITAL PAPER = une simulation indépendante par horizon, une seule position active à la fois; sizing au risque '+S.risk+'% de l\'equity, entry/SL/TP enregistrés à t0, frais '+S.fee+' bps/side, funding exclu. Le signal combine modèle appris + evidence prior temporaire, puis retire progressivement le prior avec les OOS live. PRETRAIN prix = '+((DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[S.h]&&DB.pretrain[S.coin].h[S.h].n)||0)+' labels pour '+hlabel(S.h)+'; non présenté comme OOS full. LIVE OOS = prévision gelée à t0 puis résolue au prix observé à t0+h. BASE exclut les features microstructurelles/PASR; FULL les apprend en live. PASR = feature expérimentale, verdict par différence Brier appariée + IC approximatif à 95 %. Warm-start ne réinitialise plus le live.';
 }
 async function boot(){
-  await hydratePersistent();
+  // Never block the dashboard on persistence or REST networking.
+  try{await withTimeout(hydratePersistent(),1800,'IndexedDB hydration')}catch(e){}
   S.coin=$('coin').value;S.h=+$('hor').value;S.capital=+$('capital').value||1000;S.risk=+$('risk').value||.5;S.fee=+$('fee').value||0;
   for(var pi=0;pi<H.length;pi++)paperState(H[pi]);
-  reconnectHL();reconnectBN();restSpot();await restSync();await warmStart();dashboard();
-  setInterval(function(){if(now()-S.lastRest>15000)restSync();restSpot();resolve();dashboard()},5000);
-  setInterval(function(){if(now()-S.lastForecast>55000){for(var i=0;i<H.length;i++){var f=feats(),m=mixed(H[i],f),pl=orderPlan(H[i],f,m);recordForecast(H[i],f,m,pl)}S.lastForecast=now()}},5000);
+  dashboard();
+  reconnectHL();reconnectBN();restSpot();
+  restSync().then(function(){dashboard()}).catch(function(){$('headline').textContent='flux REST indisponible; attente des WebSockets';dashboard()});
+  warmStart().then(function(){dashboard()}).catch(function(e){$('learningNote').textContent='PRETRAIN interrompu : '+String(e.message||e);dashboard()});
+  setInterval(function(){if(now()-S.lastRest>15000)restSync().catch(function(){});restSpot();resolve().catch(function(){});try{dashboard()}catch(e){$('headline').textContent='erreur de rendu : '+String(e.message||e)}},5000);
+  setInterval(function(){if(now()-S.lastForecast>55000){for(var i=0;i<H.length;i++){var f=feats(),m=mixed(H[i],f),pl=orderPlan(H[i],f);recordForecast(H[i],f,m,pl)}S.lastForecast=now()}},5000);
 }
 $('coin').onchange=function(){S.coin=$('coin').value;location.reload()};
 $('hor').onchange=function(){S.h=+$('hor').value;dashboard()};
