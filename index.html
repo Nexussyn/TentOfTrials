@@ -879,7 +879,7 @@ function updatePortfolioUniverse(ctx){
     if(name&&finite(vol))rank.push({coin:name,vol:vol,oi:+x.openInterest,funding:+x.funding,mark:+x.markPx});
   }
   rank.sort(function(a,b){return b.vol-a.vol});
-  var wanted=[S.coin].concat(P.assets||[],rank.map(function(x){return x.coin})),next=[];
+  var wanted=[S.coin].concat(rank.map(function(x){return x.coin}));if(rank.length< P.maxAssets)wanted=wanted.concat(P.assets||[]);var next=[];
   for(var j=0;j<wanted.length&&next.length<P.maxAssets;j++){
     var coin=wanted[j];
     if(!coin||next.indexOf(coin)>=0)continue;
