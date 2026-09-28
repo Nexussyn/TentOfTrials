@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Crypto Direction Engine — V13.2</title>
+<title>Crypto Direction Engine — V13.3</title>
 <style>
 :root{--bg:#061016;--p:#0c1a22;--p2:#09161d;--l:#243843;--t:#edf4f7;--m:#8ea3ad;--u:#43d19d;--d:#ff7082;--n:#f0bf55;--c:#67d7ef}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 15% 0,#122a32,#061016 42%,#050b0f);color:var(--t);font:14px/1.4 system-ui,-apple-system,Segoe UI,sans-serif}
@@ -32,7 +32,7 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
 <body>
 <header class="top">
   <div>
-    <div class="brand">CRYPTO DIRECTION ENGINE · V13.2</div>
+    <div class="brand">CRYPTO DIRECTION ENGINE · V13.3</div>
     <div class="tag">Hyperliquid primaire · Binance cross-venue · self-evaluating · persistance double · OOS résoluble après fermeture · aucune exécution réelle</div>
   </div>
   <div class="ctrl">
@@ -479,7 +479,7 @@ function bestPair(h,dir,pd,po,entry,atr){
 function orderPlan(h,f,m){
   var pL=m.p[2],pN=m.p[1],pS=m.p[0],dir=pL>=pS?'LONG':'SHORT',pd=dir==='LONG'?pL:pS,po=dir==='LONG'?pS:pL;
   var d=f.depth||{},entry=dir==='LONG'?d.ask:d.bid,a=finite(f.atr)?f.atr:(finite(S.hl.price)?S.hl.price*.0025:NaN),q=dataQuality(f),pair=bestPair(h,dir,pd,po,entry,a),riskCash=S.capital*S.risk/100;
-  var riskDist=a*pair.sl,sz=riskDist>0?riskCash/riskDist:NaN,sl=dir==='LONG'?entry-riskDist:entry+riskDist,tp=dir==='LONG'?entry+a*pair.tp:entry-a*pair.tp,rr=pair.tp/pair.sl;
+  var riskDist=a*pair.sl,sl=dir==='LONG'?entry-riskDist:entry+riskDist,tp=dir==='LONG'?entry+a*pair.tp:entry-a*pair.tp,rr=pair.tp/pair.sl,feePerUnit=(finite(entry)&&finite(sl)?(entry+sl)*(S.fee/10000):NaN),sz=riskDist>0&&finite(feePerUnit)?riskCash/(riskDist+feePerUnit):NaN;
   var feeR=entry&&a&&pair.sl?entry*((S.fee*2)/10000)/(a*pair.sl):0,evR=(pd*pair.tp)-(po*pair.sl)-feeR,evRet=entry&&a?(pd*(a*pair.tp/entry)-po*(a*pair.sl/entry)-(S.fee*2/10000)):NaN,edge=pd-po;
   var es=m.score,align=finite(es)?(dir==='LONG'?es: -es):NaN, strongEvidence=finite(align)&&align>=.12;
   var gateReasons=[];
@@ -584,7 +584,7 @@ function recordForecast(h,f,m,pl){
     pBase:m.base.p.slice(),pFull:m.full.p.slice(),vBase:m.base.v.slice(),vFull:m.full.v.slice(),candidate:pl.candidate,entry:finite(pl.entry)?pl.entry:S.hl.price,
     direction:pl.direction,dir:pl.direction,atr:f.atr,pair:pl.pair||null,sl:pl.sl,tp:pl.tp,rr:pl.rr,paper:false};
   if(actionable){
-    var riskDist=Math.abs(pl.entry-pl.sl),riskCash=pstate.capital*(rec.paperRisk)/100,sz=riskDist>0?riskCash/riskDist:NaN;
+    var riskDist=Math.abs(pl.entry-pl.sl),riskCash=pstate.capital*(rec.paperRisk)/100,feePerUnit=(finite(pl.entry)&&finite(pl.sl)?(Math.abs(pl.entry)+Math.abs(pl.sl))*(rec.paperFee/10000):NaN),sz=riskDist>0&&finite(feePerUnit)?riskCash/(riskDist+feePerUnit):NaN;
     if(finite(sz)&&sz>0){
       rec.paper=true;rec.size=sz;pstate.position={ts:rec.ts,direction:rec.direction,entry:rec.entry,sl:rec.sl,tp:rec.tp,size:sz};rec.paperRisk=S.risk;rec.paperFee=S.fee;save();
     }
@@ -762,7 +762,7 @@ function restSpot(){
 }
 async function warmStart(){
   var key=S.coin,meta=DB.pretrain[key]||{}; meta.h=meta.h||{};
-  if(H.every(function(h){return meta.h[h]&&meta.h[h].done})){ $('learningNote').textContent='PRETRAIN déjà présent pour '+S.coin+' : le Warm-start ne réinitialise plus le live. Build V13.2.'; $('modeBadge').textContent='LIVE'; dashboard(); return; }
+  if(H.every(function(h){return meta.h[h]&&meta.h[h].done})){ $('learningNote').textContent='PRETRAIN déjà présent pour '+S.coin+' : le Warm-start ne réinitialise plus le live. Build V13.3.'; $('modeBadge').textContent='LIVE'; dashboard(); return; }
   $('modeBadge').textContent='PRETRAIN';$('learningNote').textContent='Warm-start en cours : historique 1m prix sur la fenêtre maximale publique d’environ 3,4 jours. Le L2 historique complet n’est pas simulé.';
   meta.started=meta.started||now();DB.pretrain[key]=meta;save();
   for(var hi=0;hi<H.length;hi++){
@@ -854,7 +854,7 @@ function dashboard(){
   $('hist').textContent=(DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[S.h]&&DB.pretrain[S.coin].h[S.h].n)||0;$('live').textContent=st.n;$('brier').textContent=nfmt(st.b,4);$('logloss').textContent=nfmt(st.ll,4);$('hit').textContent=pct(st.hit,1);$('roll').textContent=nfmt(st.roll,4);$('pend').textContent=(DB.pending[S.coin+'_'+S.h]||[]).length;
   $('learnState').textContent=st.n<30?'LEARNING':st.n<100?'CALIBRATING': 'ADAPTIVE';
   $('kPrice').textContent=nfmt(S.hl.price,2);$('kDQ').textContent=q+'/100';$('kMix').textContent=Math.round(m.alpha*100)+'% FULL · '+(model(S.h,'full').liveSeen||0)+' live';$('kEdge').textContent=finite(pl.edge)?((pl.edge>=0?'+':'')+(pl.edge*100).toFixed(1)+' pt'):'—';var ages=[S.hl.lastBook,S.hl.lastTrades,S.bn.lastPerp,S.bn.lastMark].filter(function(x){return x>0}).map(function(x){return Math.max(0,now()-x)/1000});$('kFresh').textContent=ages.length?Math.round(Math.max.apply(null,ages))+'s':'—';
-  $('chartInfo').textContent='HL '+nfmt(S.hl.price)+' · BN '+nfmt(S.bn.price);try{renderCapital()}catch(e){} try{renderHealth()}catch(e){} try{journal()}catch(e){} $('audit').textContent='CAPITAL PAPER = une simulation indépendante par horizon, une seule position active à la fois; sizing au risque '+S.risk+'% de l\'equity, entry/SL/TP enregistrés à t0, frais '+S.fee+' bps/side, funding exclu. Le signal combine modèle appris + evidence prior temporaire, puis retire progressivement le prior avec les OOS live. PRETRAIN prix = '+((DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[S.h]&&DB.pretrain[S.coin].h[S.h].n)||0)+' labels pour '+hlabel(S.h)+'; non présenté comme OOS full. LIVE OOS = prévision gelée à t0 puis résolue au prix observé à t0+h. BASE exclut les features microstructurelles/PASR; FULL les apprend en live. PASR = feature expérimentale, verdict par différence Brier appariée + IC approximatif à 95 %. Warm-start ne réinitialise plus le live.';
+  $('chartInfo').textContent='HL '+nfmt(S.hl.price)+' · BN '+nfmt(S.bn.price);try{renderCapital()}catch(e){} try{renderHealth()}catch(e){} try{journal()}catch(e){} $('audit').textContent='CAPITAL PAPER = une simulation indépendante par horizon, une seule position active à la fois; sizing au risque '+S.risk+'% de l\'equity, entry/SL/TP enregistrés à t0, sizing incluant le coût du stop + frais aller-retour, frais '+S.fee+' bps/side, funding exclu. Le signal combine modèle appris + evidence prior temporaire, puis retire progressivement le prior avec les OOS live. PRETRAIN prix = '+((DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[S.h]&&DB.pretrain[S.coin].h[S.h].n)||0)+' labels pour '+hlabel(S.h)+'; non présenté comme OOS full. LIVE OOS = prévision gelée à t0 puis résolue au prix observé à t0+h. BASE exclut les features microstructurelles/PASR; FULL les apprend en live. PASR = feature expérimentale, verdict par différence Brier appariée + IC approximatif à 95 %. Warm-start ne réinitialise plus le live.';
 }
 function syntheticState(){
   var t=now(),base=83250;
@@ -877,7 +877,7 @@ function assertSelfTest(){
   if($('journal').textContent.indexOf('1j')<0)throw Error('1j not rendered');
   if($('capitalCards').textContent.indexOf('1000')<0)throw Error('capital cards not rendered');
   var b=$('kPrice').textContent;if(!b||b==='—')throw Error('price KPI not rendered');
-  var f=feats(),m=mixed(S.h,f),pl=orderPlan(S.h,f,m);if(!pl||!pl.candidate)throw Error('order plan did not compute');if(!(targetThreshold(83250,45,1440)>=.0015))throw Error('horizon threshold failed');if(!paperState(5)||!paperStats(5))throw Error('paper ledger unavailable');
+  var f=feats(),m=mixed(S.h,f),pl=orderPlan(S.h,f,m);if(!pl||!pl.candidate)throw Error('order plan did not compute');if(!(targetThreshold(83250,45,1440)>=.0015))throw Error('horizon threshold failed');if(!paperState(5)||!paperStats(5))throw Error('paper ledger unavailable');var rs=5,entryT=100,slT=90,feeU=(entryT+slT)*(4.5/10000),szT=rs/(Math.abs(entryT-slT)+feeU);if(Math.abs(szT-(5/(10+feeU)))>1e-12)throw Error('fee-aware sizing failed');
   var el=$('bootBanner');el.style.display='block';el.className='panel note diag selftest';el.textContent='CDE SELFTEST PASS · UI + moteur + paper ledger déterministes OK · aucune connexion réseau requise.';
 }
 async function boot(){
