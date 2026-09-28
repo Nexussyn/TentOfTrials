@@ -104,7 +104,7 @@ function featureVector(f,includePasr){return [f.structure,f.flow,f.l2,f.derivati
 function scoreModel(f,h,kind){let m=getModel(h,kind),v=featureVector(f,kind==='full'),keys=kind==='full'?['structure','flow','l2','derivatives','cross','absorption','pasr']:['structure','flow','l2','derivatives','cross','absorption'];let s=m.b;for(let i=0;i<keys.length;i++)s+=(m.w[keys[i]]||0)*v[i];return{s,v,model:m,keys}}
 function predict(h,f,kind){
  const g=scoreModel(f,h,kind), z=sig(g.s), rawLong=z, pN=clamp(.18+f.dis*.44+(100-f.quality)*.002,.18,.68), dirMass=1-pN;
- return{score:g.s,pLong=pN/2+dirMass*rawLong,pNeutral:pN,pShort=pN/2+dirMass*(1-rawLong),v:g.v,model:g.model,keys:g.keys};
+ return{score:g.s,pLong:pN/2+dirMass*rawLong,pNeutral:pN,pShort:pN/2+dirMass*(1-rawLong),v:g.v,model:g.model,keys:g.keys};
 }
 function combinedPrediction(h,f){
  const a=predict(h,f,'full'),b=predict(h,f,'base');
