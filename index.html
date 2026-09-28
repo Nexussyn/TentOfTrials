@@ -871,6 +871,33 @@ function pasrVerdict(h){
 async function hl(body){
   return fetchJSON(HLAPI,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)},7000);
 }
+function updatePortfolioUniverse(ctx){
+  if(!ctx||!ctx[0]||!Array.isArray(ctx[0].universe))return;
+  var u=ctx[0].universe,ac=Array.isArray(ctx[1])?ctx[1]:[],rank=[];
+  for(var i=0;i<u.length;i++){
+    var name=u[i]&&u[i].name,x=ac[i]||{},vol=+x.dayNtlVlm;
+    if(name&&finite(vol))rank.push({coin:name,vol:vol,oi:+x.openInterest,funding:+x.funding,mark:+x.markPx});
+  }
+  rank.sort(function(a,b){return b.vol-a.vol});
+  var wanted=[S.coin].concat(P.assets||[],rank.map(function(x){return x.coin})),next=[];
+  for(var j=0;j<wanted.length&&next.length<P.maxAssets;j++){
+    var coin=wanted[j];
+    if(!coin||next.indexOf(coin)>=0)continue;
+    if(P.volume&&P.volume[coin]===undefined&&rank.length&&rank.every(function(x){return x.coin!==coin}))continue;
+    next.push(coin);ensureAsset(coin);
+  }
+  if(next.indexOf(S.coin)<0)next.unshift(S.coin);
+  P.universe=next.slice(0,P.maxAssets);
+  P.volume={};
+  for(var k=0;k<rank.length;k++){
+    P.volume[rank[k].coin]=rank[k].vol;
+    var a=ensureAsset(rank[k].coin);
+    if(finite(rank[k].oi))a.hl.oi=rank[k].oi;
+    if(finite(rank[k].funding))a.hl.funding=rank[k].funding;
+    a.hl.lastCtx=now();
+  }
+  P.lastMeta=now();
+}
 async function restSync(){
   var t=now(),results=[];
   var jobs=[
@@ -881,6 +908,7 @@ async function restSync(){
   ];
   var settled=await Promise.all(jobs.map(function(j){return Promise.resolve(j.p).then(function(v){return{name:j.name,ok:true,v:v}}).catch(function(e){return{name:j.name,ok:false,e:e}})}));
   var hc=settled.find(function(x){return x.name==='HL_CANDLE'}),ctx=settled.find(function(x){return x.name==='HL_CTX'}),boi=settled.find(function(x){return x.name==='BN_OI'}),bp=settled.find(function(x){return x.name==='BN_PREM'});
+  if(ctx&&ctx.ok)updatePortfolioUniverse(ctx.v);
   if(hc&&hc.ok){S.hl.candles=(hc.v||[]).map(function(q){return{t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v}}).sort(function(a,b){return a.t-b.t}).slice(-5000);S.feed.HL_CANDLE='OK'}else S.feed.HL_CANDLE='STALE';
   if(ctx&&ctx.ok){var u=ctx.v&&ctx.v[0]&&ctx.v[0].universe||[],idx=u.findIndex(function(q){return q.name===S.coin});if(idx>=0&&ctx.v[1]&&ctx.v[1][idx]){S.hl.oi=+ctx.v[1][idx].openInterest;S.hl.funding=+ctx.v[1][idx].funding;S.hl.lastCtx=t;S.feed.HL_CTX='OK'}else S.feed.HL_CTX='STALE'}else S.feed.HL_CTX='STALE';
   if(boi&&boi.ok&&boi.v&&boi.v.openInterest){S.bn.oi=+boi.v.openInterest;S.bn.oiHist.push({t:t,v:S.bn.oi});S.bn.oiHist=S.bn.oiHist.slice(-1000)}
