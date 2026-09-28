@@ -49,7 +49,7 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
 <div class="panel note">
   <b>SORTIE UNIQUE :</b> <span id="headline">initialisation…</span>
   · <b>NO TRADE</b> est une décision valide.
-  · <b>Missing ≠ neutral</b> : une donnée absente retire la feature et ferme le portail de qualité si nécessaire.
+  · <b>Missing ≠ neutral</b> : une donnée absente retire la feature. Le portail ne dépend pas d'une feature secondaire absente si les sources critiques restent fraîches.
 </div>
 
 <div class="grid" style="margin-top:12px">
@@ -81,7 +81,7 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
       <div class="box"><div class="smallcaps">R:R</div><div id="rr" class="big">—</div></div>
       <div class="box"><div class="smallcaps">Taille</div><div id="size" class="big">—</div></div>
     </div>
-    <div id="whyOrder" class="note" style="margin-top:9px">—</div>
+    <div id="whyOrder" class="note" style="margin-top:9px">—</div><div id="gateInfo" class="tiny" style="margin-top:7px">—</div>
   </div>
 </div>
 
@@ -161,7 +161,7 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
     <div class="kbox"><div class="tiny">DATA QUALITY</div><b id="kDQ">—</b></div>
     <div class="kbox"><div class="tiny">MIX BASE→FULL</div><b id="kMix">—</b></div>
     <div class="kbox"><div class="tiny">FRAÎCHEUR</div><b id="kFresh">—</b></div>
-    <div class="kbox"><div class="tiny">CIBLE</div><b id="kTarget">—</b></div>
+    <div class="kbox"><div class="tiny">EDGE</div><b id="kEdge">—</b></div>
   </div>
 </div>
 </section>
@@ -397,10 +397,32 @@ function pred(h,f,k){
   for(var i=0;i<3;i++)for(var j=0;j<v.length;j++)z[i]+=(m.w[i][j]||0)*v[j];
   return{p:sigmoid(z.map(function(x){return x/(m.temp||1)})),v:v,m:m};
 }
+function evidenceScore(f){
+  var terms=[
+    ['r1',f.r1,.04],['r5',f.r5,.18],['r15',f.r15,.22],['r60',f.r60,.10],['ema',f.ema,.10],
+    ['l2',f.l2,.26],['micro',f.micro,.10],['flow',f.flow,.18],['absorption',f.absorption,.08],
+    ['funding',f.funding,.05],['basis',f.basis,.07],['spotPerp',f.spotPerp,.10],['doi',f.doi,.08],['liq',f.liq,.06],['pasr',f.pasr,.08]
+  ];
+  var num=0,den=0;
+  for(var i=0;i<terms.length;i++){
+    var v=terms[i][1],w=terms[i][2];if(!finite(v))continue;
+    var sv=scaleFeature(terms[i][0],v);if(!finite(sv))continue;
+    num+=Math.tanh(sv)*w;den+=w;
+  }
+  return den?clamp(num/den,-1,1):NaN;
+}
+function evidenceProb(f){
+  var s=evidenceScore(f);if(!finite(s))return[safeProb(1/3),safeProb(1/3),safeProb(1/3)];
+  var k=1.85*s;
+  return sigmoid([-k,0,k]);
+}
+function safeProb(x){return finite(x)?x:1/3}
 function mixed(h,f){
-  var base=pred(h,f,'base'),full=pred(h,f,'full'),fs=full.m.liveSeen||0,alpha=clamp((fs-20)/280,0,1);
-  var p=base.p.map(function(x,i){return x*(1-alpha)+full.p[i]*alpha}),s=p.reduce(function(a,b){return a+b},0);
-  return{base:base,full:full,alpha:alpha,p:p.map(function(x){return x/s})};
+  var base=pred(h,f,'base'),full=pred(h,f,'full'),ev=evidenceProb(f),fs=full.m.liveSeen||0;
+  var alpha=clamp((fs-10)/290,0,1),modelP=base.p.map(function(x,i){return x*(1-alpha)+full.p[i]*alpha});
+  var ew=clamp(.68-.00045*fs,.30,.68);
+  var p=modelP.map(function(x,i){return x*(1-ew)+ev[i]*ew}),s=p.reduce(function(a,b){return a+b},0);
+  return{base:base,full:full,evidence:ev,alpha:alpha,evidenceWeight:ew,p:p.map(function(x){return x/s}),score:evidenceScore(f)};
 }
 function dataQuality(f){
   var checks=[
@@ -425,10 +447,21 @@ function orderPlan(h,f,m){
   var pL=m.p[2],pN=m.p[1],pS=m.p[0],dir=pL>=pS?'LONG':'SHORT',pd=dir==='LONG'?pL:pS,po=dir==='LONG'?pS:pL;
   var d=f.depth||{},entry=dir==='LONG'?d.ask:d.bid,a=finite(f.atr)?f.atr:(finite(S.hl.price)?S.hl.price*.0025:NaN),q=dataQuality(f),pair=bestPair(h,dir),riskCash=S.capital*S.risk/100;
   var riskDist=a*pair.sl,sz=riskDist>0?riskCash/riskDist:NaN,sl=dir==='LONG'?entry-riskDist:entry+riskDist,tp=dir==='LONG'?entry+a*pair.tp:entry-a*pair.tp,rr=pair.tp/pair.sl;
-  var costR=entry&&a?entry*((S.fee*2)/10000)/a:0;
-  var ev=(pd*pair.tp)-(pN*0)-(po*pair.sl)-costR;
-  var gate=!finite(entry)||!finite(a)||q<75||pd<.55||(pd-po)<.08||!finite(f.l2)||!finite(ev)||ev<=0;
-  return{direction:gate?'NO TRADE':dir,candidate:dir,pd:pd,po:po,q:q,entry:gate?NaN:entry,sl:gate?NaN:sl,tp:gate?NaN:tp,rr:gate?NaN:rr,size:gate?NaN:sz,ev:gate?NaN:ev,pair:pair,reason:gate?'Portail fermé : qualité, dominance, différentiel ou espérance insuffisant.':'Portail ouvert : direction + microstructure + espérance nette.'};
+  var costR=entry&&a?entry*((S.fee*2)/10000)/a:0,ev=(pd*pair.tp)-(po*pair.sl)-costR,edge=pd-po;
+  var es=m.score,align=finite(es)?(dir==='LONG'?es: -es):NaN, strongEvidence=finite(align)&&align>=.12;
+  var gateReasons=[];
+  if(!finite(entry)||!finite(a)||!finite(f.l2))gateReasons.push('L2/ATR');
+  if(q<75)gateReasons.push('DQ<75');
+  if(pd<.47)gateReasons.push('prob<47%');
+  if(edge<.055)gateReasons.push('edge<5.5pt');
+  if(!strongEvidence)gateReasons.push('evidence');
+  if(!finite(ev)||ev<=0)gateReasons.push('EV≤0');
+  var gate=gateReasons.length>0;
+  return{
+    direction:gate?'NO TRADE':dir,candidate:dir,pd:pd,po:po,edge:edge,evidence:es,align:align,q:q,
+    entry:gate?NaN:entry,sl:gate?NaN:sl,tp:gate?NaN:tp,rr:gate?NaN:rr,size:gate?NaN:sz,ev:gate?NaN:ev,
+    pair:pair,gateReasons:gateReasons,reason:gate?'Portail fermé : '+gateReasons.join(' · '):'Portail ouvert : direction + évidence + espérance nette.'
+  };
 }
 function hlabel(h){return h===1440?'1j':h===60?'1h':h===240?'4h':h+'m'}
 function labelFromReturn(r,thr){return r>thr?2:r<-thr?0:1}
@@ -475,6 +508,7 @@ function pathBetween(t0,h){
   var first=Math.ceil(t0/60000)*60000;return{mode:'CANDLE',items:S.hl.candles.filter(function(x){return x.t>=first&&x.t<=due+60000})};
 }
 function learnGrid(h,p,pathObj){
+  if(p.dir!=='LONG'&&p.dir!=='SHORT')return;
   if(!finite(p.entry)||!finite(p.atr)||!pathObj||!pathObj.items||!pathObj.items.length)return;
   var g=grid(h,p.dir),items=pathObj.items;
   for(var i=0;i<g.length;i++){
@@ -548,7 +582,7 @@ function resolve(){
     var h=H[hi],key=S.coin+'_'+h,a=DB.pending[key]||[],keep=[];
     for(var i=0;i<a.length;i++){
       var p=a[i],due=p.ts+h*60000;if(now()<due-1500){keep.push(p);continue}
-      var at=pathPriceAt(p.ts,h);if(!at){keep.push(p);continue}
+      var at=pathPriceAt(p.ts,h);if(!at){if(now()-p.ts>72*3600000){DB.expired=(DB.expired||0)+1}else keep.push(p);continue}
       var r=at.p/p.p0-1,target=labelFromReturn(r,p.targetThr),base=model(h,'base'),full=model(h,'full');
       var baseLog=forecastLogits(base,p.vBase),fullLog=forecastLogits(full,p.vFull);
       var prB=sigmoid(baseLog.map(function(x){return x/(base.temp||1)})),prF=sigmoid(fullLog.map(function(x){return x/(full.temp||1)}));
@@ -728,7 +762,7 @@ function dashboard(){
   $('reg').textContent='Régime '+regime+' · DQ '+q+'/100';$('dq').textContent='DQ '+q;$('score').textContent='P(L)-P(S) '+(m.p[2]-m.p[0]).toFixed(3);
   $('act').textContent=dir==='LONG'?'BUY':dir==='SHORT'?'SELL':'NO TRADE';$('ord').textContent=dir==='NO TRADE'?'ABSTAIN':'READY';
   $('entry').textContent=nfmt(pl.entry);$('sl').textContent=nfmt(pl.sl);$('tp').textContent=nfmt(pl.tp);$('rr').textContent=finite(pl.rr)?'1:'+pl.rr.toFixed(2):'—';$('size').textContent=finite(pl.size)?pl.size.toFixed(5):'—';
-  $('whyOrder').textContent=pl.reason;$('headline').textContent=dir==='NO TRADE'?'aucune position à prendre maintenant':'plan '+(dir==='LONG'?'acheteur':'vendeur')+' généré';
+  $('whyOrder').textContent=pl.reason;$('gateInfo').textContent='Candidat '+pl.candidate+' · prob '+(pl.pd*100).toFixed(1)+'% · edge '+(pl.edge*100).toFixed(1)+' pts · evidence '+(finite(pl.evidence)?pl.evidence.toFixed(3):'—')+' · poids evidence '+Math.round(m.evidenceWeight*100)+'%';$('headline').textContent=dir==='NO TRADE'?'candidat '+pl.candidate+' mais portail fermé':'plan '+(dir==='LONG'?'acheteur':'vendeur')+' généré';
   $('invalidate').textContent='Invalidation : DQ < 75, probabilité directionnelle < 55 %, écart direction/opposé < 8 pts, L2 absent/stale ou EV ≤ 0.';
   renderEvidence(f,m);renderBook(f);
   $('oi').textContent=nfmt(S.hl.oi,0);var old=S.hl.oiHist.filter(function(q){return q.t<=now()-5*60000}).slice(-1)[0];$('doi').textContent=old&&finite(S.hl.oi)?pct(S.hl.oi/old.v-1):'—';
@@ -739,9 +773,9 @@ function dashboard(){
   $('c4').textContent=finite(f.pasr)?f.pasr.toFixed(3):'—';$('pasrW').textContent=w.toFixed(4);$('deltaB').textContent=finite(st.delta)?st.delta.toFixed(4):'—';$('pasrN').textContent=st.n;$('pasrV').textContent=pv;$('pasrState').textContent=pv;$('bucketN').textContent=f.pasrN;
   $('hist').textContent=(DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[S.h]&&DB.pretrain[S.coin].h[S.h].n)||0;$('live').textContent=st.n;$('brier').textContent=nfmt(st.b,4);$('logloss').textContent=nfmt(st.ll,4);$('hit').textContent=pct(st.hit,1);$('roll').textContent=nfmt(st.roll,4);$('pend').textContent=(DB.pending[S.coin+'_'+S.h]||[]).length;
   $('learnState').textContent=st.n<30?'LEARNING':st.n<100?'CALIBRATING': 'ADAPTIVE';
-  $('kPrice').textContent=nfmt(S.hl.price,2);$('kDQ').textContent=q+'/100';$('kMix').textContent=Math.round(m.alpha*100)+'% FULL · '+(model(S.h,'full').liveSeen||0)+' live';var ages=[S.hl.lastBook,S.hl.lastTrades,S.bn.lastPerp,S.bn.lastMark].filter(function(x){return x>0}).map(function(x){return Math.max(0,now()-x)/1000});$('kFresh').textContent=ages.length?Math.round(Math.max.apply(null,ages))+'s':'—';
+  $('kPrice').textContent=nfmt(S.hl.price,2);$('kDQ').textContent=q+'/100';$('kMix').textContent=Math.round(m.alpha*100)+'% FULL · '+(model(S.h,'full').liveSeen||0)+' live';$('kEdge').textContent=finite(pl.edge)?((pl.edge>=0?'+':'')+(pl.edge*100).toFixed(1)+' pt'):'—';var ages=[S.hl.lastBook,S.hl.lastTrades,S.bn.lastPerp,S.bn.lastMark].filter(function(x){return x>0}).map(function(x){return Math.max(0,now()-x)/1000});$('kFresh').textContent=ages.length?Math.round(Math.max.apply(null,ages))+'s':'—';
   $('kTarget').textContent=finite(pl.pd)?(pl.candidate+' '+(pl.pd*100).toFixed(1)+'%'): '—';
-  $('chartInfo').textContent='HL '+nfmt(S.hl.price)+' · BN '+nfmt(S.bn.price);renderCapital();renderHealth();journal();$('audit').textContent='CAPITAL PAPER = une simulation indépendante par horizon, une seule position active à la fois; sizing au risque '+S.risk+'% de l\'equity, entry/SL/TP enregistrés à t0, frais '+S.fee+' bps/side, funding exclu. PRETRAIN prix = '+((DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[S.h]&&DB.pretrain[S.coin].h[S.h].n)||0)+' labels pour '+hlabel(S.h)+'; non présenté comme OOS full. LIVE OOS = prévision gelée à t0 puis résolue au prix observé à t0+h. BASE exclut les features microstructurelles/PASR; FULL les apprend en live. PASR = feature expérimentale, verdict par différence Brier appariée + IC approximatif à 95 %. Warm-start ne réinitialise plus le live.';
+  $('chartInfo').textContent='HL '+nfmt(S.hl.price)+' · BN '+nfmt(S.bn.price);renderCapital();renderHealth();journal();$('audit').textContent='CAPITAL PAPER = une simulation indépendante par horizon, une seule position active à la fois; sizing au risque '+S.risk+'% de l\'equity, entry/SL/TP enregistrés à t0, frais '+S.fee+' bps/side, funding exclu. Le signal combine modèle appris + evidence prior temporaire, puis retire progressivement le prior avec les OOS live. PRETRAIN prix = '+((DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[S.h]&&DB.pretrain[S.coin].h[S.h].n)||0)+' labels pour '+hlabel(S.h)+'; non présenté comme OOS full. LIVE OOS = prévision gelée à t0 puis résolue au prix observé à t0+h. BASE exclut les features microstructurelles/PASR; FULL les apprend en live. PASR = feature expérimentale, verdict par différence Brier appariée + IC approximatif à 95 %. Warm-start ne réinitialise plus le live.';
 }
 async function boot(){
   await hydratePersistent();
