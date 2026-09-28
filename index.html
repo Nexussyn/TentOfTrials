@@ -192,7 +192,7 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
   </div>
   <div id="portfolioGrid" class="portfolioGrid"></div>
   <div id="portfolioNote" class="note" style="margin-top:9px">
-    Scanner des perpétuels Hyperliquid classés par volume nominal 24 h. Jusqu'à 15 actifs surveillés et 10 positions paper simultanées. Risque par position = champ Risque; levier paper maximal = 5×. Aucune exécution réelle.
+    Scanner des perpétuels Hyperliquid classés par volume nominal 24 h. Jusqu'à 15 actifs surveillés et 10 positions paper simultanées. Chaque position est plafonnée à 20% de l'equity en marge, avec un levier paper maximal de 5×; le risque par idée reste celui du champ Risque. Le but est de permettre plusieurs positions sans qu'un seul signal consomme tout le capital.
   </div>
 </div>
 </section>
@@ -356,7 +356,7 @@ var S={
 var P={
   assets:['BTC','ETH','SOL','XRP','DOGE','SUI','AVAX','LINK','AAVE','LTC','BCH','ADA','HYPE','ENA','ARB'],
   universe:['BTC','ETH','SOL','XRP','DOGE','SUI','AVAX','LINK','AAVE','LTC','BCH','ADA','HYPE','ENA','ARB'],
-  states:{},volume:{},maxAssets:15,maxSlots:10,maxLeverage:5,h:5,
+  states:{},volume:{},maxAssets:15,maxSlots:10,maxLeverage:5,maxMarginPct:.20,h:5,
   lastScan:0,lastMeta:0,lastBootstrap:0,bootstrapped:{},positions:{},cooldown:{},signalsRows:[]
 };
 function newAssetState(){
