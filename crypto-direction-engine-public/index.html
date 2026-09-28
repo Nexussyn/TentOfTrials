@@ -40,6 +40,7 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
     <select id="hor" title="Horizon de résolution de la prévision"><option value="5" selected>5m</option><option value="15">15m</option><option value="60">1h</option><option value="240">4h</option><option value="1440">1j</option></select>
     <input id="capital" type="number" value="1000" min="10" step="10" title="Capital de référence en USDC">
     <input id="risk" type="number" value="0.5" min="0.05" max="5" step="0.05" title="Risque maximum théorique par idée, en % du capital">
+    <input id="fee" type="number" value="4.5" min="0" max="20" step="0.1" title="Frais taker simulés par côté, en bps">
     <button id="relearn" title="Initialise le modèle une fois à partir de l'historique prix; ne détruit pas l'apprentissage live">Warm-start</button>
   </div>
 </header>
@@ -172,7 +173,7 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
   <div id="capitalNote" class="note" style="margin-top:9px">
     Capital de départ = valeur du champ Capital. Chaque horizon possède son propre compte théorique indépendant.
     Une position est ouverte uniquement quand le dashboard affichait BUY/SELL à t0; NO TRADE = 0 action.
-    Le risque est recalculé sur l'equity courante, pour simuler le compoundement. Frais simulés : 4,5 bps taker par côté.
+    Le risque est recalculé sur l'equity courante, pour simuler le compoundement. Les frais sont pilotés par le champ Frais (bps par côté).
     Les sorties utilisent les ticks live couvrant tout le trajet quand disponibles, sinon les bougies 1m avec résolution conservatrice en cas de TP/SL dans la même bougie; le funding n'est pas inclus faute d'historique funding complet.
   </div>
 </div>
@@ -226,7 +227,7 @@ var nfmt=function(x,d){return finite(x)?Number(x).toLocaleString('fr-FR',{maximu
 var DB=(function(){try{return JSON.parse(localStorage.getItem(STORE)||'{}')}catch(e){return{}}})();
 DB.models=DB.models||{}; DB.pending=DB.pending||{}; DB.obs=DB.obs||{}; DB.grid=DB.grid||{}; DB.pretrain=DB.pretrain||{}; DB.pasr=DB.pasr||{}; DB.paper=DB.paper||{};
 var S={
-  coin:'BTC',h:5,capital:1000,risk:.5,lastForecast:0,lastRender:0,lastRest:0,
+  coin:'BTC',h:5,capital:1000,risk:.5,fee:4.5,lastForecast:0,lastRender:0,lastRest:0,
   hl:{price:NaN,book:null,oi:NaN,funding:NaN,candles:[],trades:[],oiHist:[],lastPrice:0,lastBook:0,lastTrades:0,lastCtx:0},
   bn:{price:NaN,oi:NaN,funding:NaN,spot:[],perp:[],liq:[],oiHist:[],lastMark:0,lastSpot:0,lastPerp:0,lastLiq:0,lastRest:0},
   tape:[],feed:{HL_WS:'INIT',HL_L2:'INIT',HL_TRADES:'INIT',HL_CANDLE:'INIT',HL_CTX:'INIT',BN_WS:'INIT',BN_REST:'INIT',BN_SPOT:'INIT'}
@@ -337,7 +338,7 @@ function orderPlan(h,f,m){
   var pL=m.p[2],pN=m.p[1],pS=m.p[0],dir=pL>=pS?'LONG':'SHORT',pd=dir==='LONG'?pL:pS,po=dir==='LONG'?pS:pL;
   var d=f.depth||{},entry=dir==='LONG'?d.ask:d.bid,a=finite(f.atr)?f.atr:(finite(S.hl.price)?S.hl.price*.0025:NaN),q=dataQuality(f),pair=bestPair(h,dir),riskCash=S.capital*S.risk/100;
   var riskDist=a*pair.sl,sz=riskDist>0?riskCash/riskDist:NaN,sl=dir==='LONG'?entry-riskDist:entry+riskDist,tp=dir==='LONG'?entry+a*pair.tp:entry-a*pair.tp,rr=pair.tp/pair.sl;
-  var costR=entry&&a?entry*0.0009/a:0;
+  var costR=entry&&a?entry*((S.fee*2)/10000)/a:0;
   var ev=(pd*pair.tp)-(pN*0)-(po*pair.sl)-costR;
   var gate=!finite(entry)||!finite(a)||q<75||pd<.55||(pd-po)<.08||!finite(f.l2)||!finite(ev)||ev<=0;
   return{direction:gate?'NO TRADE':dir,candidate:dir,pd:pd,po:po,q:q,entry:gate?NaN:entry,sl:gate?NaN:sl,tp:gate?NaN:tp,rr:gate?NaN:rr,size:gate?NaN:sz,ev:gate?NaN:ev,pair:pair,reason:gate?'Portail fermé : qualité, dominance, différentiel ou espérance insuffisant.':'Portail ouvert : direction + microstructure + espérance nette.'};
@@ -367,7 +368,7 @@ function recordForecast(h,f,m,pl){
   DB.pending[key]=DB.pending[key]||[];
   if(DB.pending[key].some(function(x){return Math.abs(x.ts-now())<15000}))return;
   var p0=S.hl.price;if(!finite(p0))return;
-  DB.pending[key].push({ts:now(),h:h,coin:S.coin,p0:p0,targetThr:clamp((f.atr||p0*.0025)/p0*.45,.0004,.01),pBase:m.base.p.slice(),pFull:m.full.p.slice(),vBase:m.base.v.slice(),vFull:m.full.v.slice(),candidate:pl.candidate,entry:finite(pl.entry)?pl.entry:p0,dir:pl.direction,atr:f.atr,pair:pl.pair||null,sl:pl.sl,tp:pl.tp,rr:pl.rr});
+  DB.pending[key].push({ts:now(),h:h,coin:S.coin,p0:p0,paperCapital:S.capital,paperRisk:S.risk,paperFee:S.fee,targetThr:clamp((f.atr||p0*.0025)/p0*.45,.0004,.01),pBase:m.base.p.slice(),pFull:m.full.p.slice(),vBase:m.base.v.slice(),vFull:m.full.v.slice(),candidate:pl.candidate,entry:finite(pl.entry)?pl.entry:p0,dir:pl.direction,atr:f.atr,pair:pl.pair||null,sl:pl.sl,tp:pl.tp,rr:pl.rr});
   DB.pending[key]=DB.pending[key].slice(-250);save();
 }
 function pathPriceAt(t0,h){
@@ -408,12 +409,11 @@ function learnGrid(h,p,pathObj){
   }
   save();
 }
-const PAPER_TAKER_BPS=4.5;
 function paperKey(h){return S.coin+'_'+h}
 function paperState(h){
   var k=paperKey(h),p=DB.paper[k];
-  if(!p||p.capitalBase!==S.capital||p.risk!==S.risk){
-    p={capitalBase:S.capital,risk:S.risk,equity:S.capital,peak:S.capital,maxDD:0,trades:0,wins:0,losses:0,overlap:0,fees:0,pnl:0,lastExit:0,curve:[{t:now(),eq:S.capital}],log:[]};
+  if(!p||p.capitalBase!==S.capital||p.risk!==S.risk||p.fee!==S.fee){
+    p={capitalBase:S.capital,risk:S.risk,fee:S.fee,equity:S.capital,peak:S.capital,maxDD:0,trades:0,wins:0,losses:0,overlap:0,fees:0,pnl:0,lastExit:0,curve:[{t:now(),eq:S.capital}],log:[]};
     DB.paper[k]=p;save();
   }
   return p;
@@ -423,6 +423,7 @@ function paperPath(t0,h){
   return p;
 }
 function simulatePaperTrade(h,p,ps){
+  if(p.paperCapital!==ps.capitalBase||p.paperRisk!==ps.risk||p.paperFee!==ps.fee)return{status:'CONFIG_MISMATCH'};
   if(p.dir==='NO TRADE'||!finite(p.entry)||!finite(p.atr)||p.entry<=0)return{status:'NO_TRADE'};
   if(p.ts<ps.lastExit){ps.overlap++;return{status:'OVERLAP'};}
   var pair=p.pair||{sl:.9,tp:1.25},riskDist=p.atr*pair.sl,riskCash=ps.equity*(ps.risk/100),size=riskDist>0?riskCash/riskDist:NaN;
@@ -443,7 +444,7 @@ function simulatePaperTrade(h,p,ps){
     if(!finite(exit)&&path.items.length){exit=path.items[path.items.length-1].c;exitTs=path.items[path.items.length-1].t+60000}
   }
   if(!finite(exit))return{status:'WAIT'};
-  var gross=size*(exit-p.entry)*dir,entryNotional=Math.abs(size*p.entry),exitNotional=Math.abs(size*exit),fees=(entryNotional+exitNotional)*(PAPER_TAKER_BPS/10000),net=gross-fees;
+  var gross=size*(exit-p.entry)*dir,entryNotional=Math.abs(size*p.entry),exitNotional=Math.abs(size*exit),fees=(entryNotional+exitNotional)*(S.fee/10000),net=gross-fees;
   ps.equity=Math.max(0,ps.equity+net);ps.pnl+=net;ps.fees+=fees;ps.trades++;if(net>0)ps.wins++;else ps.losses++;
   ps.peak=Math.max(ps.peak,ps.equity);ps.maxDD=Math.max(ps.maxDD,ps.peak>0?(ps.peak-ps.equity)/ps.peak:0);ps.lastExit=exitTs||p.ts+h*60000;
   ps.curve.push({t:exitTs||now(),eq:ps.equity});ps.curve=ps.curve.slice(-1000);
@@ -653,10 +654,10 @@ function dashboard(){
   $('learnState').textContent=st.n<30?'LEARNING':st.n<100?'CALIBRATING': 'ADAPTIVE';
   $('kPrice').textContent=nfmt(S.hl.price,2);$('kDQ').textContent=q+'/100';$('kMix').textContent=Math.round(m.alpha*100)+'% FULL · '+(model(S.h,'full').liveSeen||0)+' live';var ages=[S.hl.lastBook,S.hl.lastTrades,S.bn.lastPerp,S.bn.lastMark].filter(function(x){return x>0}).map(function(x){return Math.max(0,now()-x)/1000});$('kFresh').textContent=ages.length?Math.round(Math.max.apply(null,ages))+'s':'—';
   $('kTarget').textContent=finite(pl.pd)?(pl.candidate+' '+(pl.pd*100).toFixed(1)+'%'): '—';
-  $('chartInfo').textContent='HL '+nfmt(S.hl.price)+' · BN '+nfmt(S.bn.price);renderCapital();renderHealth();journal();$('audit').textContent='CAPITAL PAPER = une simulation indépendante par horizon, une seule position active à la fois; sizing au risque '+S.risk+'% de l\'equity, entry/SL/TP enregistrés à t0, frais 4,5 bps/side, funding exclu. PRETRAIN prix = '+((DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[S.h]&&DB.pretrain[S.coin].h[S.h].n)||0)+' labels pour '+S.h+hlabel(S.h)+'; non présenté comme OOS full. LIVE OOS = prévision gelée à t0 puis résolue au prix observé à t0+h. BASE exclut les features microstructurelles/PASR; FULL les apprend en live. PASR = feature expérimentale, verdict par différence Brier appariée + IC approximatif à 95 %. Warm-start ne réinitialise plus le live.';
+  $('chartInfo').textContent='HL '+nfmt(S.hl.price)+' · BN '+nfmt(S.bn.price);renderCapital();renderHealth();journal();$('audit').textContent='CAPITAL PAPER = une simulation indépendante par horizon, une seule position active à la fois; sizing au risque '+S.risk+'% de l\'equity, entry/SL/TP enregistrés à t0, frais '+S.fee+' bps/side, funding exclu. PRETRAIN prix = '+((DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[S.h]&&DB.pretrain[S.coin].h[S.h].n)||0)+' labels pour '+hlabel(S.h)+'; non présenté comme OOS full. LIVE OOS = prévision gelée à t0 puis résolue au prix observé à t0+h. BASE exclut les features microstructurelles/PASR; FULL les apprend en live. PASR = feature expérimentale, verdict par différence Brier appariée + IC approximatif à 95 %. Warm-start ne réinitialise plus le live.';
 }
 async function boot(){
-  S.coin=$('coin').value;S.h=+$('hor').value;S.capital=+$('capital').value||1000;S.risk=+$('risk').value||.5;
+  S.coin=$('coin').value;S.h=+$('hor').value;S.capital=+$('capital').value||1000;S.risk=+$('risk').value||.5;S.fee=+$('fee').value||0;
   for(var pi=0;pi<H.length;pi++)paperState(H[pi]);
   reconnectHL();reconnectBN();restSpot();await restSync();await warmStart();dashboard();
   setInterval(function(){if(now()-S.lastRest>15000)restSync();restSpot();resolve();dashboard()},5000);
@@ -666,6 +667,7 @@ $('coin').onchange=function(){S.coin=$('coin').value;location.reload()};
 $('hor').onchange=function(){S.h=+$('hor').value;dashboard()};
 $('capital').oninput=function(){S.capital=+$('capital').value||1000};
 $('risk').oninput=function(){S.risk=+$('risk').value||.5};
+$('fee').oninput=function(){S.fee=+$('fee').value||0};
 $('relearn').onclick=function(){warmStart()};
 boot();
 </script>
