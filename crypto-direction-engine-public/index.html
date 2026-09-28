@@ -234,7 +234,7 @@ var S={
 
 function save(){try{localStorage.setItem(ST,JSON.stringify(DB))}catch(e){}}
 function newM(){return{w:Array.from({length:3},function(){return Array(30).fill(0)}),b:[0,0,0],seen:0,liveSeen:0,temp:1,obs:[]}}
-function model(h,k){var key=S.coin+'_'+h;if(!DB.models[key])DB.models[key]={base:newM(),full:newM()};var m=DB.models[key][k]||newM();if(!m.w||m.w.length!==3||m.w.some(function(row){return !row||row.length!==30})){var oldW=m.w||[];m.w=Array.from({length:3},function(_,i){var row=(oldW[i]||[]).slice(0,30);while(row.length<30)row.push(0);return row});m.b=m.b||[0,0,0];m.seen=m.seen||0;m.liveSeen=m.liveSeen||0;m.temp=m.temp||1;m.obs=m.obs||[]}DB.models[key][k]=m;return m}
+function model(h,k){var key=S.coin+'_'+h;if(!DB.models[key])DB.models[key]={base:newM(),full:newM()};var m=DB.models[key][k]||newM();if(!m.w||m.w.length!==3||m.w.some(function(row){return !row||row.length!==30})){var oldW=m.w||[];m.w=Array.from({length:3},function(_,i){var row=(oldW[i]||[]).slice(0,30);while(row.length<30)row.push(0);return row});m.b=m.b||[0,0,0];m.seen=m.seen||0;m.liveSeen=m.liveSeen==null?((DB.obs[key]||[]).length):m.liveSeen;m.temp=m.temp||1;m.obs=m.obs||[]}DB.models[key][k]=m;return m}
 function sigmoid(z){var m=Math.max.apply(null,z),e=z.map(function(v){return Math.exp(clamp(v-m,-30,30))}),s=e.reduce(function(a,b){return a+b},0);return e.map(function(v){return v/s})}
 function ema(a,n){if(!a.length)return NaN;var e=a[0],k=2/(n+1);for(var i=1;i<a.length;i++)e=a[i]*k+e*(1-k);return e}
 function ret(a,n){return a.length>n?a[a.length-1]/a[a.length-1-n]-1:NaN}
@@ -355,7 +355,7 @@ function calibrate(m,source){
   m.temp=bestT;
 }
 function update(m,target,p,v,isLive){
-  var lr=.035/(1+m.seen*.0015);
+  var lr=isLive?.03/(1+(m.liveSeen||0)*.003):.02/(1+m.seen*.0015);
   for(var k=0;k<3;k++){var e=(target===k?1:0)-p[k];m.b[k]=clamp(m.b[k]+lr*e,-5,5);for(var j=0;j<v.length;j++)m.w[k][j]=clamp(m.w[k][j]+lr*e*v[j],-2,2)}
   m.seen++;if(isLive)m.liveSeen=(m.liveSeen||0)+1;
 }
@@ -375,7 +375,7 @@ function pathPriceAt(t0,h){
   if(tick.length>=3&&tick[0].t<=t0+5000&&tick[tick.length-1].t>=due-5000){
     for(var i=0;i<tick.length;i++)if(tick[i].t>=due-1000)return{t:tick[i].t,p:tick[i].p};
   }
-  var bars=S.hl.candles.filter(function(x){return x.t>=t0&&x.t<=due+60000});
+  var first=Math.ceil(t0/60000)*60000,bars=S.hl.candles.filter(function(x){return x.t>=first&&x.t<=due+60000});
   if(!bars.length)return null;
   var best=bars[0],bd=Math.abs((best.t+30000)-due);
   for(var j=1;j<bars.length;j++){var cd=Math.abs((bars[j].t+30000)-due);if(cd<bd){best=bars[j];bd=cd}}
@@ -384,7 +384,7 @@ function pathPriceAt(t0,h){
 function pathBetween(t0,h){
   var due=t0+h*60000,tick=S.tape.filter(function(x){return x.t>=t0-2000&&x.t<=due+2000&&finite(x.p)});
   if(tick.length>=3&&tick[0].t<=t0+5000&&tick[tick.length-1].t>=due-5000)return{mode:'TICK',items:tick};
-  return{mode:'CANDLE',items:S.hl.candles.filter(function(x){return x.t>=t0-60000&&x.t<=due+60000})};
+  var first=Math.ceil(t0/60000)*60000;return{mode:'CANDLE',items:S.hl.candles.filter(function(x){return x.t>=first&&x.t<=due+60000})};
 }
 function learnGrid(h,p,pathObj){
   if(!finite(p.entry)||!finite(p.atr)||!pathObj||!pathObj.items||!pathObj.items.length)return;
