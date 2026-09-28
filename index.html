@@ -449,7 +449,7 @@ function portfolioScan(){
       continue;
     }
     try{
-      var out=withAsset(coin,function(){S.capital=p.capital;var f=feats(),m=mixed(h,f),pl=orderPlan(h,f);return{f:f,pl:pl}});
+      var out=withAsset(coin,function(){S.capital=p.capital;var f=feats(),m=mixed(h,f),pl=orderPlan(h,f,m);return{f:f,m:m,pl:pl}});
       var pl=out.pl,act=(pl.direction==='LONG'||pl.direction==='SHORT')?pl.direction:'NO TRADE',existing=positions[coin];
       if(act!=='NO TRADE'&&!existing)portfolioOpen(coin,h,out.f,pl);
       mk=portfolioMark(coin);existing=portfolioState().positions&&portfolioState().positions[coin];
