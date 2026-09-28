@@ -167,7 +167,7 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
 
 <section class="full">
 <div class="panel">
-  <div class="title"><h3>Capital simulé · suivi exact des recommandations</h3><span class="badge">PAPER · LIVE OOS</span></div>
+  <div class="title"><h3>Capital simulé · suivi des recommandations LIVE</h3><span class="badge">PAPER · LIVE OOS</span></div>
   <div id="capitalCards" class="capitalGrid"></div>
   <div id="capitalNote" class="note" style="margin-top:9px">
     Capital de départ = valeur du champ Capital. Chaque horizon possède son propre compte théorique indépendant.
@@ -233,8 +233,8 @@ var S={
 };
 
 function save(){try{localStorage.setItem(ST,JSON.stringify(DB))}catch(e){}}
-function newM(){return{w:Array.from({length:3},function(){return Array(30).fill(0)}),b:[0,0,0],seen:0,temp:1,obs:[]}}
-function model(h,k){var key=S.coin+'_'+h;if(!DB.models[key])DB.models[key]={base:newM(),full:newM()};var m=DB.models[key][k]||newM();if(!m.w||m.w.length!==3||m.w.some(function(row){return !row||row.length!==30})){var oldW=m.w||[];m.w=Array.from({length:3},function(_,i){var row=(oldW[i]||[]).slice(0,30);while(row.length<30)row.push(0);return row});m.b=m.b||[0,0,0];m.seen=m.seen||0;m.temp=m.temp||1;m.obs=m.obs||[]}DB.models[key][k]=m;return m}
+function newM(){return{w:Array.from({length:3},function(){return Array(30).fill(0)}),b:[0,0,0],seen:0,liveSeen:0,temp:1,obs:[]}}
+function model(h,k){var key=S.coin+'_'+h;if(!DB.models[key])DB.models[key]={base:newM(),full:newM()};var m=DB.models[key][k]||newM();if(!m.w||m.w.length!==3||m.w.some(function(row){return !row||row.length!==30})){var oldW=m.w||[];m.w=Array.from({length:3},function(_,i){var row=(oldW[i]||[]).slice(0,30);while(row.length<30)row.push(0);return row});m.b=m.b||[0,0,0];m.seen=m.seen||0;m.liveSeen=m.liveSeen||0;m.temp=m.temp||1;m.obs=m.obs||[]}DB.models[key][k]=m;return m}
 function sigmoid(z){var m=Math.max.apply(null,z),e=z.map(function(v){return Math.exp(clamp(v-m,-30,30))}),s=e.reduce(function(a,b){return a+b},0);return e.map(function(v){return v/s})}
 function ema(a,n){if(!a.length)return NaN;var e=a[0],k=2/(n+1);for(var i=1;i<a.length;i++)e=a[i]*k+e*(1-k);return e}
 function ret(a,n){return a.length>n?a[a.length-1]/a[a.length-1-n]-1:NaN}
@@ -310,7 +310,7 @@ function pred(h,f,k){
   return{p:sigmoid(z.map(function(x){return x/(m.temp||1)})),v:v,m:m};
 }
 function mixed(h,f){
-  var base=pred(h,f,'base'),full=pred(h,f,'full'),fs=full.m.seen,alpha=clamp(fs/300,0,1);
+  var base=pred(h,f,'base'),full=pred(h,f,'full'),fs=full.m.liveSeen||0,alpha=clamp((fs-20)/280,0,1);
   var p=base.p.map(function(x,i){return x*(1-alpha)+full.p[i]*alpha}),s=p.reduce(function(a,b){return a+b},0);
   return{base:base,full:full,alpha:alpha,p:p.map(function(x){return x/s})};
 }
@@ -347,16 +347,17 @@ function labelFromReturn(r,thr){return r>thr?2:r<-thr?0:1}
 function brier(p,target){return p.reduce(function(s,x,i){var y=i===target?1:0;return s+(x-y)*(x-y)},0)}
 function logloss(p,target){return -Math.log(clamp(p[target],1e-9,1))}
 function metricArr(a){if(!a.length)return NaN;return a.reduce(function(x,y){return x+y},0)/a.length}
-function calibrate(m){
-  if(m.obs.length<60)return;
-  var recent=m.obs.slice(-240),bestT=m.temp,best=Infinity;
+function calibrate(m,source){
+  var recent=m.obs.filter(function(o){return !source||o.source===source}).slice(-240);
+  if(recent.length<60)return;
+  var bestT=m.temp,best=Infinity;
   for(var t=.5;t<=2.51;t+=.05){var ll=0;for(var i=0;i<recent.length;i++){var pr=sigmoid(recent[i].logits.map(function(x){return x/t}));ll+=logloss(pr,recent[i].target)}ll/=recent.length;if(ll<best){best=ll;bestT=t}}
   m.temp=bestT;
 }
-function update(m,target,p,v){
+function update(m,target,p,v,isLive){
   var lr=.035/(1+m.seen*.0015);
   for(var k=0;k<3;k++){var e=(target===k?1:0)-p[k];m.b[k]=clamp(m.b[k]+lr*e,-5,5);for(var j=0;j<v.length;j++)m.w[k][j]=clamp(m.w[k][j]+lr*e*v[j],-2,2)}
-  m.seen++;
+  m.seen++;if(isLive)m.liveSeen=(m.liveSeen||0)+1;
 }
 function forecastLogits(m,v){
   var z=m.b.slice();for(var i=0;i<3;i++)for(var j=0;j<v.length;j++)z[i]+=(m.w[i][j]||0)*v[j];return z;
@@ -463,9 +464,9 @@ function resolve(){
       var r=at.p/p.p0-1,target=labelFromReturn(r,p.targetThr),base=model(h,'base'),full=model(h,'full');
       var baseLog=forecastLogits(base,p.vBase),fullLog=forecastLogits(full,p.vFull);
       var prB=sigmoid(baseLog.map(function(x){return x/(base.temp||1)})),prF=sigmoid(fullLog.map(function(x){return x/(full.temp||1)}));
-      base.obs.push({logits:baseLog,target:target});full.obs.push({logits:fullLog,target:target});base.obs=base.obs.slice(-300);full.obs=full.obs.slice(-300);
-      update(base,target,prB,p.vBase);update(full,target,prF,p.vFull);
-      calibrate(base);calibrate(full);
+      base.obs.push({logits:baseLog,target:target,source:'LIVE'});full.obs.push({logits:fullLog,target:target,source:'LIVE'});base.obs=base.obs.slice(-300);full.obs=full.obs.slice(-300);
+      update(base,target,prB,p.vBase,true);update(full,target,prF,p.vFull,true);
+      calibrate(base,'LIVE');calibrate(full,'LIVE');
       if(DB.obs[key]==null)DB.obs[key]=[];DB.obs[key].push({ts:p.ts,target:target,pb:prB,pf:prF});DB.obs[key]=DB.obs[key].slice(-500);
       learnGrid(h,p,pathBetween(p.ts,h));simulatePaperTrade(h,p,paperState(h));
     }
@@ -575,11 +576,11 @@ async function warmStart(){
       for(var i=80;i<bars.length-h;i+=step){
         var c=bars.slice(0,i+1),clo=c.map(function(q){return q.c}),f={r1:ret(clo,1),r5:ret(clo,5),r15:ret(clo,15),r60:ret(clo,60),ema:ema(clo.slice(-180),9)/ema(clo.slice(-180),21)-1,l2:NaN,micro:NaN,flow:NaN,absorption:NaN,funding:NaN,basis:NaN,spotPerp:NaN,doi:NaN,liq:NaN,pasr:NaN,atr:atr(c.slice(-120))};
         var r=bars[i+h].c/bars[i].c-1,thr=clamp((f.atr||bars[i].c*.0025)/bars[i].c*.45,.0004,.01),target=labelFromReturn(r,thr),vb=vec(f,false),zb=forecastLogits(bm,vb),pb=sigmoid(zb),vf=vec(f,true),zf=forecastLogits(fm,vf),pf=sigmoid(zf);
-        update(bm,target,pb,vb);update(fm,target,pf,vf);bm.obs.push({logits:zb,target:target});fm.obs.push({logits:zf,target:target});
+        update(bm,target,pb,vb,false);update(fm,target,pf,vf,false);bm.obs.push({logits:zb,target:target,source:'PRETRAIN'});fm.obs.push({logits:zf,target:target,source:'PRETRAIN'});
         meta.n++;
       }
       bm.obs=bm.obs.slice(-300);fm.obs=fm.obs.slice(-300);
-      calibrate(bm);calibrate(fm); meta.h[h].n=bm.seen; meta.h[h].done=true;
+      calibrate(bm,'PRETRAIN');calibrate(fm,'PRETRAIN'); meta.h[h].n=bm.seen; meta.h[h].done=true;
     }catch(e){}
     var total=H.reduce(function(s,hh){return s+((meta.h[hh]&&meta.h[hh].n)||0)},0);meta.n=total;DB.pretrain[key]=meta;save();
     $('hist').textContent=(meta.h[S.h]&&meta.h[S.h].n)||0;await new Promise(function(r){setTimeout(r,0)});
@@ -650,7 +651,7 @@ function dashboard(){
   $('c4').textContent=finite(f.pasr)?f.pasr.toFixed(3):'—';$('pasrW').textContent=w.toFixed(4);$('deltaB').textContent=finite(st.delta)?st.delta.toFixed(4):'—';$('pasrN').textContent=st.n;$('pasrV').textContent=pv;$('pasrState').textContent=pv;$('bucketN').textContent=f.pasrN;
   $('hist').textContent=(DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[S.h]&&DB.pretrain[S.coin].h[S.h].n)||0;$('live').textContent=st.n;$('brier').textContent=nfmt(st.b,4);$('logloss').textContent=nfmt(st.ll,4);$('hit').textContent=pct(st.hit,1);$('roll').textContent=nfmt(st.roll,4);$('pend').textContent=(DB.pending[S.coin+'_'+S.h]||[]).length;
   $('learnState').textContent=st.n<30?'LEARNING':st.n<100?'CALIBRATING': 'ADAPTIVE';
-  $('kPrice').textContent=nfmt(S.hl.price,2);$('kDQ').textContent=q+'/100';$('kMix').textContent=Math.round(m.alpha*100)+'% FULL';var ages=[S.hl.lastBook,S.hl.lastTrades,S.bn.lastPerp,S.bn.lastMark].filter(function(x){return x>0}).map(function(x){return Math.max(0,now()-x)/1000});$('kFresh').textContent=ages.length?Math.round(Math.max.apply(null,ages))+'s':'—';
+  $('kPrice').textContent=nfmt(S.hl.price,2);$('kDQ').textContent=q+'/100';$('kMix').textContent=Math.round(m.alpha*100)+'% FULL · '+(model(S.h,'full').liveSeen||0)+' live';var ages=[S.hl.lastBook,S.hl.lastTrades,S.bn.lastPerp,S.bn.lastMark].filter(function(x){return x>0}).map(function(x){return Math.max(0,now()-x)/1000});$('kFresh').textContent=ages.length?Math.round(Math.max.apply(null,ages))+'s':'—';
   $('kTarget').textContent=finite(pl.pd)?(pl.candidate+' '+(pl.pd*100).toFixed(1)+'%'): '—';
   $('chartInfo').textContent='HL '+nfmt(S.hl.price)+' · BN '+nfmt(S.bn.price);renderCapital();renderHealth();journal();$('audit').textContent='CAPITAL PAPER = une simulation indépendante par horizon, une seule position active à la fois; sizing au risque '+S.risk+'% de l\'equity, entry/SL/TP enregistrés à t0, frais 4,5 bps/side, funding exclu. PRETRAIN prix = '+((DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[S.h]&&DB.pretrain[S.coin].h[S.h].n)||0)+' labels pour '+S.h+hlabel(S.h)+'; non présenté comme OOS full. LIVE OOS = prévision gelée à t0 puis résolue au prix observé à t0+h. BASE exclut les features microstructurelles/PASR; FULL les apprend en live. PASR = feature expérimentale, verdict par différence Brier appariée + IC approximatif à 95 %. Warm-start ne réinitialise plus le live.';
 }
