@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Crypto Direction Engine — V13.5</title>
+<title>Crypto Direction Engine — V13.6</title>
 <style>
 :root{--bg:#061016;--p:#0c1a22;--p2:#09161d;--l:#243843;--t:#edf4f7;--m:#8ea3ad;--u:#43d19d;--d:#ff7082;--n:#f0bf55;--c:#67d7ef}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 15% 0,#122a32,#061016 42%,#050b0f);color:var(--t);font:14px/1.4 system-ui,-apple-system,Segoe UI,sans-serif}
@@ -32,7 +32,7 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
 <body>
 <header class="top">
   <div>
-    <div class="brand">CRYPTO DIRECTION ENGINE · V13.5</div>
+    <div class="brand">CRYPTO DIRECTION ENGINE · V13.6</div>
     <div class="tag">Hyperliquid primaire · Binance cross-venue · self-evaluating · persistance double · OOS résoluble après fermeture · aucune exécution réelle</div>
   </div>
   <div class="ctrl">
@@ -513,8 +513,22 @@ function update(m,target,p,v,isLive){
   for(var k=0;k<3;k++){var e=(target===k?1:0)-p[k];m.b[k]=clamp(m.b[k]+lr*e,-5,5);for(var j=0;j<v.length;j++)m.w[k][j]=clamp(m.w[k][j]+lr*e*v[j],-2,2)}
   m.seen++;if(isLive)m.liveSeen=(m.liveSeen||0)+1;
 }
+function safeVector(v,n){
+  if(Array.isArray(v)&&v.length>=n)return v.slice(0,n).map(function(x){return finite(x)?x:0});
+  return null;
+}
+function probsToLogits(p){
+  if(!Array.isArray(p)||p.length!==3)return null;
+  var q=p.map(function(x){return Math.max(1e-9,Number(x)||0)}),s=q.reduce(function(a,b){return a+b},0)||1;
+  q=q.map(function(x){return x/s});
+  var z=q.map(function(x){return Math.log(x)}),m=Math.max.apply(null,z);
+  return z.map(function(x){return x-m});
+}
 function forecastLogits(m,v){
-  var z=m.b.slice();for(var i=0;i<3;i++)for(var j=0;j<v.length;j++)z[i]+=(m.w[i][j]||0)*v[j];return z;
+  var vv=safeVector(v,30);if(!vv)return null;
+  var z=Array.isArray(m.b)?m.b.slice(0,3):[0,0,0];
+  for(var i=0;i<3;i++)for(var j=0;j<30;j++)z[i]+=(m.w[i]&&finite(m.w[i][j])?m.w[i][j]:0)*vv[j];
+  return z;
 }
 function paperState(h){
   var key=S.coin+'_'+h;
@@ -658,23 +672,48 @@ async function resolve(){
       for(var i=0;i<a.length;i++){
         var p=a[i],due=p.ts+h*60000;
         if(now()<due-1500){keep.push(p);continue}
-        var path=await fetchPath(p.ts,h),at=path&&pathPriceAt(p.ts,h,path);
-        if(!at){if(now()-p.ts>7*86400000)DB.expired=(DB.expired||0)+1;else keep.push(p);continue}
-        var r=at.p/p.p0-1,target=labelFromReturn(r,finite(p.targetThr)?p.targetThr:targetThreshold(p.p0,p.atr,h)),base=model(h,'base'),full=model(h,'full');
-        var baseLog=forecastLogits(base,p.vBase),fullLog=forecastLogits(full,p.vFull);
-        var prB=sigmoid(baseLog.map(function(x){return x/(base.temp||1)})),prF=sigmoid(fullLog.map(function(x){return x/(full.temp||1)}));
-        base.obs.push({logits:baseLog,target:target,source:'LIVE'});full.obs.push({logits:fullLog,target:target,source:'LIVE'});base.obs=base.obs.slice(-300);full.obs=full.obs.slice(-300);
-        update(base,target,prB,p.vBase,true);update(full,target,prF,p.vFull,true);
-        calibrate(base,'LIVE');calibrate(full,'LIVE');
-        if(!DB.obs[key])DB.obs[key]=[];DB.obs[key].push({ts:p.ts,target:target,pb:prB,pf:prF});DB.obs[key]=DB.obs[key].slice(-500);
-        learnGrid(h,p,path);simulatePaperTrade(h,p,path);if(p.paper){var led=paperState(h);led.position=null;DB.paper[key]=led;}
+        try{
+          var path=await fetchPath(p.ts,h),at=path&&pathPriceAt(p.ts,h,path);
+          if(!at){if(now()-p.ts>7*86400000)DB.expired=(DB.expired||0)+1;else keep.push(p);continue}
+          var r=at.p/p.p0-1,target=labelFromReturn(r,finite(p.targetThr)?p.targetThr:targetThreshold(p.p0,p.atr,h)),base=model(h,'base'),full=model(h,'full');
+          var baseLog=forecastLogits(base,p.vBase),fullLog=forecastLogits(full,p.vFull),prB=null,prF=null,legacy=false;
+          if(baseLog&&fullLog){
+            prB=sigmoid(baseLog.map(function(x){return x/(base.temp||1)}));
+            prF=sigmoid(fullLog.map(function(x){return x/(full.temp||1)}));
+            base.obs.push({logits:baseLog,target:target,source:'LIVE'});
+            full.obs.push({logits:fullLog,target:target,source:'LIVE'});
+            base.obs=base.obs.slice(-300);full.obs=full.obs.slice(-300);
+            update(base,target,prB,p.vBase,true);update(full,target,prF,p.vFull,true);
+            calibrate(base,'LIVE');calibrate(full,'LIVE');
+          }else{
+            // Compatibility with pending records created by V10–V13.5.
+            // We retain their frozen probabilities for OOS scoring, but never
+            // fabricate missing feature vectors for online learning.
+            prB=probsToLogits(p.pBase);prF=probsToLogits(p.pFull);
+            if(!prB||!prF)throw new Error('pending record lacks frozen vectors and probabilities');
+            prB=sigmoid(prB);prF=sigmoid(prF);legacy=true;
+            DB.legacyResolved=(DB.legacyResolved||0)+1;
+          }
+          if(!DB.obs[key])DB.obs[key]=[];
+          DB.obs[key].push({ts:p.ts,target:target,pb:prB,pf:prF,source:legacy?'LEGACY':'LIVE'});
+          DB.obs[key]=DB.obs[key].slice(-500);
+          if(!legacy){
+            learnGrid(h,p,path);
+            simulatePaperTrade(h,p,path);
+            if(p.paper){var led=paperState(h);led.position=null;DB.paper[key]=led}
+          }
+        }catch(e){
+          diagError('RESOLVE_'+h,e);
+          // Do not let one malformed legacy item stop every horizon forever.
+          if(now()-p.ts>10*60000)DB.resolvedErrors=(DB.resolvedErrors||0)+1;
+          else keep.push(p);
+        }
       }
       DB.pending[key]=keep;
     }
     save();
   }finally{resolving=false}
-}
-function statsFor(h){
+}function statsFor(h){
   var m=model(h,'full'),o=DB.obs[S.coin+'_'+h]||[];
   if(!o.length)return{n:0,b:NaN,ll:NaN,hit:NaN,roll:NaN,delta:NaN,ciLo:NaN,ciHi:NaN};
   var bs=o.map(function(x){return brier(x.pf,x.target)}),ls=o.map(function(x){return logloss(x.pf,x.target)}),hits=o.map(function(x){return x.pf.indexOf(Math.max.apply(null,x.pf))===x.target?1:0}),recent=bs.slice(-50);
@@ -762,7 +801,7 @@ function restSpot(){
 }
 async function warmStart(){
   var key=S.coin,meta=DB.pretrain[key]||{}; meta.h=meta.h||{};
-  if(H.every(function(h){return meta.h[h]&&meta.h[h].done})){ $('learningNote').textContent='PRETRAIN déjà présent pour '+S.coin+' : le Warm-start ne réinitialise plus le live. Build V13.5.'; $('modeBadge').textContent='LIVE'; dashboard(); return; }
+  if(H.every(function(h){return meta.h[h]&&meta.h[h].done})){ $('learningNote').textContent='PRETRAIN déjà présent pour '+S.coin+' : le Warm-start ne réinitialise plus le live. Build V13.6.'; $('modeBadge').textContent='LIVE'; dashboard(); return; }
   $('modeBadge').textContent='PRETRAIN';$('learningNote').textContent='Warm-start en cours : historique 1m prix sur la fenêtre maximale publique d’environ 3,4 jours. Le L2 historique complet n’est pas simulé.';
   meta.started=meta.started||now();DB.pretrain[key]=meta;save();
   for(var hi=0;hi<H.length;hi++){
