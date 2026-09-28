@@ -889,22 +889,58 @@ async function restSync(){
 }
 function reconnectHL(){
   var attempt=0,timer=null;
+  function subscribeUniverse(ws){
+    var subs=[{type:'allMids'}],u=P.universe.length?P.universe:[S.coin];
+    for(var i=0;i<u.length;i++){
+      subs.push({type:'l2Book',coin:u[i]});
+      subs.push({type:'trades',coin:u[i]});
+      subs.push({type:'candle',coin:u[i],interval:'1m'});
+      subs.push({type:'activeAssetCtx',coin:u[i]});
+    }
+    subs.forEach(function(sub){try{ws.send(JSON.stringify({method:'subscribe',subscription:sub}))}catch(e){}});
+  }
   function go(){
     attempt++;S.feed.HL_WS='RECONNECTING';
     try{
       var ws=new WebSocket(HLWS);S.hlSocket=ws;
-      ws.onopen=function(){attempt=0;S.feed.HL_WS='OK';
-        var subs=[{type:'allMids'},{type:'l2Book',coin:S.coin},{type:'trades',coin:S.coin},{type:'candle',coin:S.coin,interval:'1m'},{type:'activeAssetCtx',coin:S.coin}];
-        subs.forEach(function(sub){ws.send(JSON.stringify({method:'subscribe',subscription:sub}))});
+      ws.onopen=function(){
+        attempt=0;S.feed.HL_WS='OK';subscribeUniverse(ws);
         clearInterval(timer);timer=setInterval(function(){if(ws.readyState===1)ws.send(JSON.stringify({method:'ping'}))},20000);
       };
       ws.onmessage=function(e){try{
         var m=JSON.parse(e.data),t=now();
-        if(m.channel==='allMids'&&m.data&&m.data.mids&&m.data.mids[S.coin]!=null){S.hl.price=+m.data.mids[S.coin];S.hl.lastPrice=t;S.tape.push({t:t,p:S.hl.price});S.tape=S.tape.slice(-50000)}
-        else if(m.channel==='l2Book'){S.hl.book=m.data;S.hl.lastBook=t;S.feed.HL_L2='OK'}
-        else if(m.channel==='trades'){var ar=Array.isArray(m.data)?m.data:[m.data];for(var i=0;i<ar.length;i++)if(ar[i]&&ar[i].side&&ar[i].sz!=null)S.hl.trades.push({time:+ar[i].time||t,side:ar[i].side==='B'?'B':'S',sz:+ar[i].sz});S.hl.trades=S.hl.trades.slice(-12000);S.hl.lastTrades=t;S.feed.HL_TRADES='OK'}
-        else if(m.channel==='candle'){var q=m.data;if(q&&q.t!=null){S.hl.candles.push({t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v});var mm={};for(var j=0;j<S.hl.candles.length;j++)mm[S.hl.candles[j].t]=S.hl.candles[j];S.hl.candles=Object.keys(mm).sort(function(a,b){return +a-+b}).map(function(k){return mm[k]}).slice(-5000);S.feed.HL_CANDLE='OK'}}
-        else if(m.channel==='activeAssetCtx'){var q2=m.data&&m.data.ctx?m.data.ctx:m.data;if(q2){if(q2.openInterest!=null){S.hl.oi=+q2.openInterest;S.hl.oiHist.push({t:t,v:S.hl.oi});S.hl.oiHist=S.hl.oiHist.slice(-1000)}if(q2.funding!=null)S.hl.funding=+q2.funding;S.hl.lastCtx=t;S.feed.HL_CTX='OK'}}
+        if(m.channel==='allMids'&&m.data&&m.data.mids){
+          var mids=m.data.mids;
+          Object.keys(mids).forEach(function(coin){
+            var a=ensureAsset(coin);a.hl.price=+mids[coin];a.hl.lastPrice=t;
+            a.tape.push({t:t,p:a.hl.price});a.tape=a.tape.slice(-50000);
+          });
+          if(mids[S.coin]!=null){var a0=ensureAsset(S.coin);S.hl=a0.hl;S.tape=a0.tape}
+        }else if(m.channel==='l2Book'&&m.data){
+          var coin=m.data.coin,a=ensureAsset(coin);a.hl.book=m.data;a.hl.lastBook=t;a.feed.HL_L2='OK';
+          if(coin===S.coin)S.hl=a.hl;
+        }else if(m.channel==='trades'&&Array.isArray(m.data)&&m.data.length){
+          var coin=m.data[0].coin,a=ensureAsset(coin),ar=m.data;
+          for(var i=0;i<ar.length;i++)if(ar[i]&&ar[i].side&&ar[i].sz!=null)a.hl.trades.push({time:+ar[i].time||t,side:ar[i].side==='B'?'B':'S',sz:+ar[i].sz});
+          a.hl.trades=a.hl.trades.slice(-12000);a.hl.lastTrades=t;a.feed.HL_TRADES='OK';
+          if(coin===S.coin)S.hl=a.hl;
+        }else if(m.channel==='candle'&&m.data){
+          var q=m.data,coin=q.s||q.coin,a=ensureAsset(coin||S.coin);
+          if(q.t!=null){
+            a.hl.candles.push({t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v});
+            var mm={};for(var j=0;j<a.hl.candles.length;j++)mm[a.hl.candles[j].t]=a.hl.candles[j];
+            a.hl.candles=Object.keys(mm).sort(function(x,y){return +x-+y}).map(function(k){return mm[k]}).slice(-5000);
+            a.feed.HL_CANDLE='OK';if((coin||S.coin)===S.coin)S.hl=a.hl;
+          }
+        }else if(m.channel==='activeAssetCtx'&&m.data){
+          var d=m.data,coin=d.coin||S.coin,q2=d.ctx||d,a=ensureAsset(coin);
+          if(q2){
+            if(q2.openInterest!=null){a.hl.oi=+q2.openInterest;a.hl.oiHist.push({t:t,v:a.hl.oi});a.hl.oiHist=a.hl.oiHist.slice(-1000)}
+            if(q2.funding!=null)a.hl.funding=+q2.funding;
+            a.hl.lastCtx=t;a.feed.HL_CTX='OK';
+            if(coin===S.coin)S.hl=a.hl;
+          }
+        }
       }catch(e){}};
       ws.onclose=function(){clearInterval(timer);S.feed.HL_WS='RECONNECTING';setTimeout(go,clamp(1000*Math.pow(2,Math.min(attempt,6)),1000,30000)+Math.random()*1000)};
       ws.onerror=function(){try{ws.close()}catch(e){}};
