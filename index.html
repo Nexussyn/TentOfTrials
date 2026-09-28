@@ -1009,7 +1009,8 @@ function reconnectHL(){
         }else if(m.channel==='bbo'&&m.data){
           var bd2=m.data.data||m.data,coin2=bd2.coin||S.coin,a2=ensureAsset(coin2),bbo=bd2.bbo;
           if(Array.isArray(bbo)&&bbo.length===2&&bbo[0]&&bbo[1]){
-            a2.hl.bbo=bbo;a2.hl.lastBook=t;a2.feed.HL_L2='OK';
+            a2.hl.bbo=bbo;
+            if(!a2.hl.book)a2.hl.book={coin:coin2,time:t,levels:[[bbo[0]],[bbo[1]]]};
             if(coin2===S.coin){S.hl=a2.hl}
           }
         }else if(m.channel==='candle'&&m.data){
