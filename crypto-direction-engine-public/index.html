@@ -173,7 +173,7 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
     Capital de départ = valeur du champ Capital. Chaque horizon possède son propre compte théorique indépendant.
     Une position est ouverte uniquement quand le dashboard affichait BUY/SELL à t0; NO TRADE = 0 action.
     Le risque est recalculé sur l'equity courante, pour simuler le compoundement. Frais simulés : 4,5 bps taker par côté.
-    Les sorties utilisent les ticks live quand disponibles, sinon les bougies 1m; le funding n'est pas inclus faute d'historique funding complet.
+    Les sorties utilisent les ticks live couvrant tout le trajet quand disponibles, sinon les bougies 1m avec résolution conservatrice en cas de TP/SL dans la même bougie; le funding n'est pas inclus faute d'historique funding complet.
   </div>
 </div>
 </section>
@@ -337,7 +337,7 @@ function orderPlan(h,f,m){
   var pL=m.p[2],pN=m.p[1],pS=m.p[0],dir=pL>=pS?'LONG':'SHORT',pd=dir==='LONG'?pL:pS,po=dir==='LONG'?pS:pL;
   var d=f.depth||{},entry=dir==='LONG'?d.ask:d.bid,a=finite(f.atr)?f.atr:(finite(S.hl.price)?S.hl.price*.0025:NaN),q=dataQuality(f),pair=bestPair(h,dir),riskCash=S.capital*S.risk/100;
   var riskDist=a*pair.sl,sz=riskDist>0?riskCash/riskDist:NaN,sl=dir==='LONG'?entry-riskDist:entry+riskDist,tp=dir==='LONG'?entry+a*pair.tp:entry-a*pair.tp,rr=pair.tp/pair.sl;
-  var costR=entry&&a?entry*0.00035/a:0;
+  var costR=entry&&a?entry*0.0009/a:0;
   var ev=(pd*pair.tp)-(pN*0)-(po*pair.sl)-costR;
   var gate=!finite(entry)||!finite(a)||q<75||pd<.55||(pd-po)<.08||!finite(f.l2)||!finite(ev)||ev<=0;
   return{direction:gate?'NO TRADE':dir,candidate:dir,pd:pd,po:po,q:q,entry:gate?NaN:entry,sl:gate?NaN:sl,tp:gate?NaN:tp,rr:gate?NaN:rr,size:gate?NaN:sz,ev:gate?NaN:ev,pair:pair,reason:gate?'Portail fermé : qualité, dominance, différentiel ou espérance insuffisant.':'Portail ouvert : direction + microstructure + espérance nette.'};
@@ -370,24 +370,39 @@ function recordForecast(h,f,m,pl){
   DB.pending[key]=DB.pending[key].slice(-250);save();
 }
 function pathPriceAt(t0,h){
-  var due=t0+h*60000,arr=S.tape;
-  for(var i=0;i<arr.length;i++)if(arr[i].t>=due-1000)return{t:arr[i].t,p:arr[i].p};
-  return null;
+  var due=t0+h*60000,tick=S.tape.filter(function(x){return x.t>=t0-2000&&x.t<=due+2000&&finite(x.p)});
+  if(tick.length>=3&&tick[0].t<=t0+5000&&tick[tick.length-1].t>=due-5000){
+    for(var i=0;i<tick.length;i++)if(tick[i].t>=due-1000)return{t:tick[i].t,p:tick[i].p};
+  }
+  var bars=S.hl.candles.filter(function(x){return x.t>=t0&&x.t<=due+60000});
+  if(!bars.length)return null;
+  var best=bars[0],bd=Math.abs((best.t+30000)-due);
+  for(var j=1;j<bars.length;j++){var cd=Math.abs((bars[j].t+30000)-due);if(cd<bd){best=bars[j];bd=cd}}
+  return{t:best.t+30000,p:best.c};
 }
 function pathBetween(t0,h){
-  var due=t0+h*60000,arr=S.tape.filter(function(x){return x.t>=t0&&x.t<=due+5000});
-  return arr;
+  var due=t0+h*60000,tick=S.tape.filter(function(x){return x.t>=t0-2000&&x.t<=due+2000&&finite(x.p)});
+  if(tick.length>=3&&tick[0].t<=t0+5000&&tick[tick.length-1].t>=due-5000)return{mode:'TICK',items:tick};
+  return{mode:'CANDLE',items:S.hl.candles.filter(function(x){return x.t>=t0-60000&&x.t<=due+60000})};
 }
-function learnGrid(h,p,path){
-  if(!finite(p.entry)||!finite(p.atr)||!path.length)return;
-  var g=grid(h,p.dir);
+function learnGrid(h,p,pathObj){
+  if(!finite(p.entry)||!finite(p.atr)||!pathObj||!pathObj.items||!pathObj.items.length)return;
+  var g=grid(h,p.dir),items=pathObj.items;
   for(var i=0;i<g.length;i++){
     var x=g[i],sd=p.atr*x.sl,td=p.atr*x.tp,dir=p.dir==='SHORT'?-1:1,out=null;
-    for(var j=0;j<path.length;j++){
-      var q=path[j].p,hitSL=dir>0?q<=p.entry-sd:q>=p.entry+sd,hitTP=dir>0?q>=p.entry+td:q<=p.entry-td;
-      if(hitSL){out=-x.sl;break}if(hitTP){out=x.tp;break}
+    for(var j=0;j<items.length;j++){
+      if(pathObj.mode==='TICK'){
+        var q=items[j].p,hitSL=dir>0?q<=p.entry-sd:q>=p.entry+sd,hitTP=dir>0?q>=p.entry+td:q<=p.entry-td;
+        if(hitSL){out=-x.sl;break}if(hitTP){out=x.tp;break}
+      }else{
+        var q2=items[j],hitSL2=dir>0?q2.l<=p.entry-sd:q2.h>=p.entry+sd,hitTP2=dir>0?q2.h>=p.entry+td:q2.l<=p.entry-td;
+        if(hitSL2||hitTP2){out=hitSL2?-x.sl:x.tp;break}
+      }
     }
-    if(out===null){var last=path[path.length-1].p;out=dir>0?(last-p.entry)/p.atr:(p.entry-last)/p.atr}
+    if(out===null){
+      var last=pathObj.mode==='TICK'?items[items.length-1].p:items[items.length-1].c;
+      out=dir>0?(last-p.entry)/p.atr:(p.entry-last)/p.atr;
+    }
     x.n++;x.ev=((x.ev*(x.n-1))+out)/x.n;
   }
   save();
@@ -403,10 +418,8 @@ function paperState(h){
   return p;
 }
 function paperPath(t0,h){
-  var due=t0+h*60000, tick=S.tape.filter(function(x){return x.t>=t0&&x.t<=due+2000&&finite(x.p)});
-  if(tick.length>=3)return{mode:'TICK',items:tick};
-  var bars=S.hl.candles.filter(function(x){return x.t>=t0&&x.t<=due+60000});
-  return{mode:'CANDLE',items:bars};
+  var p=pathBetween(t0,h);
+  return p;
 }
 function simulatePaperTrade(h,p,ps){
   if(p.dir==='NO TRADE'||!finite(p.entry)||!finite(p.atr)||p.entry<=0)return{status:'NO_TRADE'};
@@ -431,7 +444,7 @@ function simulatePaperTrade(h,p,ps){
   if(!finite(exit))return{status:'WAIT'};
   var gross=size*(exit-p.entry)*dir,entryNotional=Math.abs(size*p.entry),exitNotional=Math.abs(size*exit),fees=(entryNotional+exitNotional)*(PAPER_TAKER_BPS/10000),net=gross-fees;
   ps.equity=Math.max(0,ps.equity+net);ps.pnl+=net;ps.fees+=fees;ps.trades++;if(net>0)ps.wins++;else ps.losses++;
-  ps.peak=Math.max(ps.peak,ps.equity);ps.maxDD=Math.max(ps.maxDD,ps.peak>0?(ps.peak-ps.equity)/ps.peak:0);ps.lastExit=p.ts+h*60000;
+  ps.peak=Math.max(ps.peak,ps.equity);ps.maxDD=Math.max(ps.maxDD,ps.peak>0?(ps.peak-ps.equity)/ps.peak:0);ps.lastExit=exitTs||p.ts+h*60000;
   ps.curve.push({t:exitTs||now(),eq:ps.equity});ps.curve=ps.curve.slice(-1000);
   ps.log.push({ts:p.ts,h:h,dir:p.dir,entry:p.entry,sl:sl,tp:tp,size:size,exit:exit,reason:reason,gross:gross,fees:fees,net:net,equity:ps.equity,mode:path.mode});
   ps.log=ps.log.slice(-500);save();
@@ -639,7 +652,7 @@ function dashboard(){
   $('learnState').textContent=st.n<30?'LEARNING':st.n<100?'CALIBRATING': 'ADAPTIVE';
   $('kPrice').textContent=nfmt(S.hl.price,2);$('kDQ').textContent=q+'/100';$('kMix').textContent=Math.round(m.alpha*100)+'% FULL';var ages=[S.hl.lastBook,S.hl.lastTrades,S.bn.lastPerp,S.bn.lastMark].filter(function(x){return x>0}).map(function(x){return Math.max(0,now()-x)/1000});$('kFresh').textContent=ages.length?Math.round(Math.max.apply(null,ages))+'s':'—';
   $('kTarget').textContent=finite(pl.pd)?(pl.candidate+' '+(pl.pd*100).toFixed(1)+'%'): '—';
-  $('chartInfo').textContent='HL '+nfmt(S.hl.price)+' · BN '+nfmt(S.bn.price);renderCapital();renderHealth();journal();$('audit').textContent='CAPITAL PAPER = une simulation indépendante par horizon, une seule position active à la fois; sizing au risque '+S.risk+'% de l\'equity, entry/SL/TP enregistrés à t0, frais 4,5 bps/side, funding exclu. PRETRAIN prix = '+((DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[S.h]&&DB.pretrain[S.coin].h[S.h].n)||0)+' labels pour '+S.h+'m; non présenté comme OOS full. LIVE OOS = prévision gelée à t0 puis résolue au prix observé à t0+h. BASE exclut les features microstructurelles/PASR; FULL les apprend en live. PASR = feature expérimentale, verdict par différence Brier appariée + IC approximatif à 95 %. Warm-start ne réinitialise plus le live.';
+  $('chartInfo').textContent='HL '+nfmt(S.hl.price)+' · BN '+nfmt(S.bn.price);renderCapital();renderHealth();journal();$('audit').textContent='CAPITAL PAPER = une simulation indépendante par horizon, une seule position active à la fois; sizing au risque '+S.risk+'% de l\'equity, entry/SL/TP enregistrés à t0, frais 4,5 bps/side, funding exclu. PRETRAIN prix = '+((DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[S.h]&&DB.pretrain[S.coin].h[S.h].n)||0)+' labels pour '+S.h+hlabel(S.h)+'; non présenté comme OOS full. LIVE OOS = prévision gelée à t0 puis résolue au prix observé à t0+h. BASE exclut les features microstructurelles/PASR; FULL les apprend en live. PASR = feature expérimentale, verdict par différence Brier appariée + IC approximatif à 95 %. Warm-start ne réinitialise plus le live.';
 }
 async function boot(){
   S.coin=$('coin').value;S.h=+$('hor').value;S.capital=+$('capital').value||1000;S.risk=+$('risk').value||.5;
