@@ -356,7 +356,7 @@ var S={
 var P={
   assets:['BTC','ETH','SOL','XRP','DOGE','SUI','AVAX','LINK','AAVE','LTC','BCH','ADA','HYPE','ENA','ARB'],
   universe:['BTC','ETH','SOL','XRP','DOGE','SUI','AVAX','LINK','AAVE','LTC','BCH','ADA','HYPE','ENA','ARB'],
-  states:{},volume:{},maxAssets:15,maxSlots:10,maxLeverage:5,maxMarginPct:.20,h:5,
+  states:{},volume:{},wsSubscribed:{},maxAssets:15,maxSlots:10,maxLeverage:5,maxMarginPct:.20,h:5,
   lastScan:0,lastMeta:0,lastBootstrap:0,bootstrapped:{},positions:{},cooldown:{},signalsRows:[]
 };
 function newAssetState(){
@@ -426,15 +426,16 @@ function updatePortfolioPositions(){
 }
 function portfolioScan(){
   P.h=S.h;var h=P.h,p=portfolioState(),rows=[];
+  var positions=p.positions||{};
   for(var i=0;i<P.universe.length;i++){
-    var coin=P.universe[i],a=ensureAsset(coin);
-    if(!a.hl.candles.length||!finite(a.hl.price))continue;
+    var coin=P.universe[i],a=ensureAsset(coin),hasData=a.hl.candles.length>=80&&finite(a.hl.price);
+    if(!hasData){rows.push({coin:coin,volume:P.volume[coin]||0,action:'CHARGEMENT',p:NaN,edge:NaN,ev:NaN,pos:!!positions[coin]});continue}
     try{
-      var out=withAsset(coin,function(){S.capital=p.capital;var f=feats(),m=mixed(h,f),pl=orderPlan(h,f,m);return{f:f,m:m,pl:pl}});
+      var out=withAsset(coin,function(){S.capital=p.capital;var f=feats(),m=mixed(h,f),pl=orderPlan(h,f,m);return{f:f,pl:pl}});
       var pl=out.pl,act=(pl.direction==='LONG'||pl.direction==='SHORT')?pl.direction:'NO TRADE';
-      if(act!=='NO TRADE'&&!p.positions[coin])portfolioOpen(coin,h,out.f,pl);
-      rows.push({coin:coin,volume:P.volume[coin]||0,action:act,p:pl.pd||0,edge:pl.edge||0,ev:pl.ev||0,pos:!!p.positions[coin]});
-    }catch(e){rows.push({coin:coin,volume:P.volume[coin]||0,action:'ERROR',p:0,edge:0,ev:0,pos:!!p.positions[coin]})}
+      if(act!=='NO TRADE'&&!positions[coin])portfolioOpen(coin,h,out.f,pl);
+      rows.push({coin:coin,volume:P.volume[coin]||0,action:act,p:finite(pl.pd)?pl.pd:NaN,edge:finite(pl.edge)?pl.edge:NaN,ev:finite(pl.ev)?pl.ev:NaN,pos:!!positions[coin]});
+    }catch(e){rows.push({coin:coin,volume:P.volume[coin]||0,action:'ERROR',p:NaN,edge:NaN,ev:NaN,pos:!!positions[coin]})}
   }
   P.signalsRows=rows;P.lastScan=now();save();renderPortfolio();
 }
@@ -442,7 +443,7 @@ function renderPortfolio(){
   var p=portfolioState(),used=portfolioMarginUsed(p),free=Math.max(0,p.capital-used),risk=portfolioRiskOpen(p),ks=Object.keys(p.positions||{}),rows=(P.signalsRows||[]).slice().sort(function(a,b){return(b.volume||0)-(a.volume||0)});
   $('portCapital').textContent=nfmt(p.capital,2)+' USDC';$('portUsed').textContent=nfmt(used,2)+' USDC';$('portFree').textContent=nfmt(free,2)+' USDC';$('portSlots').textContent=ks.length+' / '+P.maxSlots;$('portRisk').textContent=nfmt(risk,2)+' USDC';$('portfolioBadge').textContent=P.universe.length+' ACTIFS · '+ks.length+'/'+P.maxSlots+' SLOTS';
   var html='<div class="portfolioRow header"><div>Actif</div><div>Signal</div><div>Prob.</div><div>Edge</div><div>EV</div><div>État</div></div>';
-  for(var i=0;i<rows.length;i++){var q=rows[i],cls=q.action==='LONG'?'up':q.action==='SHORT'?'down':'neu',st=q.pos?'POSITION':'SURVEILLE';html+='<div class="portfolioRow"><b>'+q.coin+'</b><b class="'+cls+'">'+q.action+'</b><span>'+(q.p*100).toFixed(1)+'%</span><span>'+((q.edge*100).toFixed(1))+' pt</span><span>'+(finite(q.ev)?(q.ev*10000).toFixed(2):'—')+' bps</span><span>'+st+'</span></div>'}
+  for(var i=0;i<rows.length;i++){var q=rows[i],cls=q.action==='LONG'?'up':q.action==='SHORT'?'down':'neu',st=q.pos?'POSITION':q.action==='CHARGEMENT'?'DONNÉES':'SURVEILLE';html+='<div class="portfolioRow"><b>'+q.coin+'</b><b class="'+cls+'">'+q.action+'</b><span>'+(finite(q.p)?(q.p*100).toFixed(1)+'%':'—')+'</span><span>'+(finite(q.edge)?((q.edge*100).toFixed(1))+' pt':'—')+'</span><span>'+(finite(q.ev)?(q.ev*10000).toFixed(2)+' bps':'—')+'</span><span>'+st+'</span></div>'}
   $('portfolioGrid').innerHTML=html;
 }
 function newM(){return{w:Array.from({length:3},function(){return Array(30).fill(0)}),b:[0,0,0],seen:0,liveSeen:0,temp:1,obs:[]}}
@@ -876,29 +877,21 @@ async function hl(body){
 function updatePortfolioUniverse(ctx){
   if(!ctx||!ctx[0]||!Array.isArray(ctx[0].universe))return;
   var u=ctx[0].universe,ac=Array.isArray(ctx[1])?ctx[1]:[],rank=[];
-  for(var i=0;i<u.length;i++){
-    var name=u[i]&&u[i].name,x=ac[i]||{},vol=+x.dayNtlVlm;
-    if(name&&finite(vol))rank.push({coin:name,vol:vol,oi:+x.openInterest,funding:+x.funding,mark:+x.markPx});
-  }
+  for(var i=0;i<u.length;i++){var name=u[i]&&u[i].name,x=ac[i]||{},vol=+x.dayNtlVlm;if(name&&finite(vol))rank.push({coin:name,vol:vol,oi:+x.openInterest,funding:+x.funding})}
   rank.sort(function(a,b){return b.vol-a.vol});
-  var wanted=[S.coin].concat(rank.map(function(x){return x.coin}));if(rank.length< P.maxAssets)wanted=wanted.concat(P.assets||[]);var next=[];
-  for(var j=0;j<wanted.length&&next.length<P.maxAssets;j++){
-    var coin=wanted[j];
-    if(!coin||next.indexOf(coin)>=0)continue;
-    if(P.volume&&P.volume[coin]===undefined&&rank.length&&rank.every(function(x){return x.coin!==coin}))continue;
-    next.push(coin);ensureAsset(coin);
-  }
-  if(next.indexOf(S.coin)<0)next.unshift(S.coin);
-  P.universe=next.slice(0,P.maxAssets);
-  P.volume={};
-  for(var k=0;k<rank.length;k++){
-    P.volume[rank[k].coin]=rank[k].vol;
-    var a=ensureAsset(rank[k].coin);
-    if(finite(rank[k].oi))a.hl.oi=rank[k].oi;
-    if(finite(rank[k].funding))a.hl.funding=rank[k].funding;
-    a.hl.lastCtx=now();
-  }
-  P.lastMeta=now();
+  var wanted=[S.coin].concat(rank.map(function(x){return x.coin})),next=[],seen={};
+  for(var j=0;j<wanted.length&&next.length<P.maxAssets;j++){var coin=wanted[j];if(!coin||seen[coin])continue;seen[coin]=true;next.push(coin);ensureAsset(coin)}
+  P.universe=next.slice(0,P.maxAssets);P.volume={};
+  for(var k=0;k<rank.length;k++){P.volume[rank[k].coin]=rank[k].vol;var a=ensureAsset(rank[k].coin);if(finite(rank[k].oi))a.hl.oi=rank[k].oi;if(finite(rank[k].funding))a.hl.funding=rank[k].funding;a.hl.lastCtx=now()}
+  P.lastMeta=now();if(S.hlSocket&&S.hlSocket.readyState===1)subscribeNewPortfolioAssets();
+}
+function subscribeNewPortfolioAssets(){
+  var ws=S.hlSocket;if(!ws||ws.readyState!==1)return;
+  var list=P.universe.slice(),subs=[],seen=P.wsSubscribed||{};P.wsSubscribed=seen;
+  for(var i=0;i<list.length;i++){var coin=list[i];if(seen[coin])continue;seen[coin]=true;subs.push({type:'l2Book',coin:coin},{type:'trades',coin:coin},{type:'candle',coin:coin,interval:'1m'},{type:'activeAssetCtx',coin:coin})}
+  var cur=0;
+  function sendBatch(){if(ws.readyState!==1)return;var n=0;while(cur<subs.length&&n<4){try{ws.send(JSON.stringify({method:'subscribe',subscription:subs[cur++]}))}catch(e){}n++}if(cur<subs.length)setTimeout(sendBatch,100)}
+  sendBatch();
 }
 async function restSync(){
   var t=now(),results=[];
@@ -921,117 +914,37 @@ async function restSync(){
 S.feed.BN_REST=(boi&&boi.ok)||(bp&&bp.ok)?'OK':'STALE';S.lastRest=t;S.bn.lastRest=t;return settled;
 }
 function reconnectHL(){
-  var attempt=0,timer=null,subTimer=null;
-  function sendSub(ws,sub){
-    try{ws.send(JSON.stringify({method:'subscribe',subscription:sub}));return true}catch(e){return false}
-  }
-  function subscribeUniverse(ws){
-    var u=P.universe.length?P.universe:[S.coin],critical=[
-      {type:'l2Book',coin:S.coin},
-      {type:'trades',coin:S.coin},
-      {type:'candle',coin:S.coin,interval:'1m'},
-      {type:'activeAssetCtx',coin:S.coin},
-      {type:'bbo',coin:S.coin}
-    ];
-    // Critical selected-coin feeds first.
-    critical.forEach(function(sub){sendSub(ws,sub)});
-    // Then add the rest gradually instead of blasting dozens of subscriptions
-    // in one event-loop turn. Hyperliquid allows 1000 subscriptions per connection,
-    // but pacing makes rejects/disconnects easier to avoid. 
-    var rest=[],seen={}; 
-    for(var i=0;i<critical.length;i++)seen[JSON.stringify(critical[i])]=true;
-    for(var j=0;j<u.length;j++){
-      var subs=[
-        {type:'l2Book',coin:u[j]},
-        {type:'trades',coin:u[j]},
-        {type:'candle',coin:u[j],interval:'1m'},
-        {type:'activeAssetCtx',coin:u[j]},
-        {type:'bbo',coin:u[j]}
-      ];
-      for(var k=0;k<subs.length;k++){
-        var key=JSON.stringify(subs[k]);if(seen[key])continue;seen[key]=true;rest.push(subs[k]);
-      }
-    }
-    var cursor=0;clearInterval(subTimer);
-    subTimer=setInterval(function(){
-      if(ws.readyState!==1){clearInterval(subTimer);return}
-      var n=0;while(cursor<rest.length&&n<5){sendSub(ws,rest[cursor++]);n++}
-      if(cursor>=rest.length)clearInterval(subTimer);
-    },120);
-  }
+  var attempt=0,timer=0,retry=0;
   function go(){
     attempt++;S.feed.HL_WS='RECONNECTING';
     try{
       var ws=new WebSocket(HLWS);S.hlSocket=ws;
       ws.onopen=function(){
-        attempt=0;S.feed.HL_WS='OK';
-        S.feed.HL_L2=S.hl.lastBook?'OK':'WAIT';
-        S.feed.HL_TRADES=S.hl.lastTrades?'OK':'WAIT';
-        subscribeUniverse(ws);
-        // One critical retry shortly after connect, in case the first
-        // subscribe packet was lost or rejected during reconnect.
-        setTimeout(function(){
-          if(ws.readyState===1){
-            if(!S.hl.lastBook)sendSub(ws,{type:'l2Book',coin:S.coin});
-            if(!S.hl.lastTrades)sendSub(ws,{type:'trades',coin:S.coin});
-          }
-        },1500);
+        attempt=0;P.wsSubscribed={};S.feed.HL_WS='OK';
+        var coin=S.coin;
+        [{type:'allMids'},{type:'l2Book',coin:coin},{type:'trades',coin:coin},{type:'candle',coin:coin,interval:'1m'},{type:'activeAssetCtx',coin:coin}].forEach(function(sub){try{ws.send(JSON.stringify({method:'subscribe',subscription:sub}))}catch(e){}});
+        P.wsSubscribed[coin]=true;
+        setTimeout(function(){if(ws.readyState===1){if(!fresh(S.hl.lastBook,5000))try{ws.send(JSON.stringify({method:'subscribe',subscription:{type:'l2Book',coin:S.coin}}))}catch(e){}if(!fresh(S.hl.lastTrades,10000))try{ws.send(JSON.stringify({method:'subscribe',subscription:{type:'trades',coin:S.coin}}))}catch(e){}}},2000);
+        subscribeNewPortfolioAssets();
         clearInterval(timer);timer=setInterval(function(){if(ws.readyState===1)ws.send(JSON.stringify({method:'ping'}))},20000);
       };
       ws.onmessage=function(e){try{
         var m=JSON.parse(e.data),t=now();
-        if(m.channel==='subscriptionResponse'){
-          var sub=m.data&&m.data.subscription,res=m.data&&m.data.response;
-          if(res&&res.type==='error')diagError('HL_SUB_'+((sub&&sub.type)||'UNKNOWN'),new Error(String(res.payload||res.error||'subscription error')));
-          return;
-        }
         if(m.channel==='allMids'&&m.data&&m.data.mids){
-          var mids=m.data.mids;
-          Object.keys(mids).forEach(function(coin){
-            var a=ensureAsset(coin);a.hl.price=+mids[coin];a.hl.lastPrice=t;
-            a.tape.push({t:t,p:a.hl.price});a.tape=a.tape.slice(-50000);
-          });
-          if(mids[S.coin]!=null){var a0=ensureAsset(S.coin);S.hl=a0.hl;S.tape=a0.tape}
+          Object.keys(m.data.mids).forEach(function(coin){var a=ensureAsset(coin),px=+m.data.mids[coin];if(finite(px)){a.hl.price=px;a.hl.lastPrice=t;a.tape.push({t:t,p:px});a.tape=a.tape.slice(-50000)}});
+          S.hl=ensureAsset(S.coin).hl;S.tape=ensureAsset(S.coin).tape;
         }else if(m.channel==='l2Book'&&m.data){
-          var bd=m.data.data||m.data,coin=bd.coin||S.coin,a=ensureAsset(coin);
-          if(Array.isArray(bd.levels)&&bd.levels.length>=2){
-            a.hl.book=bd;a.hl.lastBook=t;a.feed.HL_L2='OK';
-            if(coin===S.coin)S.hl=a.hl;
-          }
+          var d=m.data.data||m.data,coin=d.coin||S.coin;if(Array.isArray(d.levels)&&d.levels.length>=2){var a=ensureAsset(coin);a.hl.book=d;a.hl.lastBook=t;a.feed.HL_L2='OK';if(coin===S.coin)S.hl=a.hl}
         }else if(m.channel==='trades'&&m.data){
-          var ar=Array.isArray(m.data)?m.data:(Array.isArray(m.data.trades)?m.data.trades:[]),coin=ar.length&&ar[0].coin?ar[0].coin:S.coin;
-          if(ar.length){
-            var a=ensureAsset(coin);
-            for(var i=0;i<ar.length;i++)if(ar[i]&&ar[i].side&&ar[i].sz!=null)a.hl.trades.push({time:+ar[i].time||t,side:(ar[i].side==='B'||ar[i].side==='Buy')?'B':'S',sz:+ar[i].sz});
-            a.hl.trades=a.hl.trades.slice(-12000);a.hl.lastTrades=t;a.feed.HL_TRADES='OK';
-            if(coin===S.coin)S.hl=a.hl;
-          }
-        }else if(m.channel==='bbo'&&m.data){
-          var bd2=m.data.data||m.data,coin2=bd2.coin||S.coin,a2=ensureAsset(coin2),bbo=bd2.bbo;
-          if(Array.isArray(bbo)&&bbo.length===2&&bbo[0]&&bbo[1]){
-            a2.hl.bbo=bbo;
-            if(!a2.hl.book)a2.hl.book={coin:coin2,time:t,levels:[[bbo[0]],[bbo[1]]]};
-            if(coin2===S.coin){S.hl=a2.hl}
-          }
+          var ar=Array.isArray(m.data)?m.data:(Array.isArray(m.data.trades)?m.data.trades:[]),coin=ar[0]&&ar[0].coin?ar[0].coin:S.coin;
+          if(ar.length){var a=ensureAsset(coin);for(var i=0;i<ar.length;i++){var q=ar[i];if(q&&q.side&&q.sz!=null)a.hl.trades.push({time:+q.time||t,side:q.side==='B'?'B':'S',sz:+q.sz})}a.hl.trades=a.hl.trades.slice(-12000);a.hl.lastTrades=t;a.feed.HL_TRADES='OK';if(coin===S.coin)S.hl=a.hl}
         }else if(m.channel==='candle'&&m.data){
-          var q=m.data.data||m.data,coin=q.s||q.coin,a=ensureAsset(coin||S.coin);
-          if(q.t!=null){
-            a.hl.candles.push({t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v});
-            var mm={};for(var j=0;j<a.hl.candles.length;j++)mm[a.hl.candles[j].t]=a.hl.candles[j];
-            a.hl.candles=Object.keys(mm).sort(function(x,y){return +x-+y}).map(function(k){return mm[k]}).slice(-5000);
-            a.feed.HL_CANDLE='OK';if((coin||S.coin)===S.coin)S.hl=a.hl;
-          }
+          var q=m.data.data||m.data,coin=q.s||q.coin,a=ensureAsset(coin||S.coin);if(q&&q.t!=null){a.hl.candles.push({t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v});a.hl.candles=a.hl.candles.slice(-5000);a.feed.HL_CANDLE='OK';if((coin||S.coin)===S.coin)S.hl=a.hl}
         }else if(m.channel==='activeAssetCtx'&&m.data){
-          var d=m.data.data||m.data,coin=d.coin||S.coin,q2=d.ctx||d,a=ensureAsset(coin);
-          if(q2){
-            if(q2.openInterest!=null){a.hl.oi=+q2.openInterest;a.hl.oiHist.push({t:t,v:a.hl.oi});a.hl.oiHist=a.hl.oiHist.slice(-1000)}
-            if(q2.funding!=null)a.hl.funding=+q2.funding;
-            a.hl.lastCtx=t;a.feed.HL_CTX='OK';
-            if(coin===S.coin)S.hl=a.hl;
-          }
+          var d2=m.data.data||m.data,coin2=d2.coin||S.coin,q2=d2.ctx||d2,a2=ensureAsset(coin2);if(q2){if(q2.openInterest!=null){a2.hl.oi=+q2.openInterest;a2.hl.oiHist.push({t:t,v:a2.hl.oi});a2.hl.oiHist=a2.hl.oiHist.slice(-1000)}if(q2.funding!=null)a2.hl.funding=+q2.funding;a2.hl.lastCtx=t;a2.feed.HL_CTX='OK';if(coin2===S.coin)S.hl=a2.hl}
         }
       }catch(e){diagError('HL_WS_MESSAGE',e)}};
-      ws.onclose=function(){clearInterval(timer);clearInterval(subTimer);S.feed.HL_WS='RECONNECTING';setTimeout(go,clamp(1000*Math.pow(2,Math.min(attempt,6)),1000,30000)+Math.random()*1000)};
+      ws.onclose=function(){clearInterval(timer);S.feed.HL_WS='RECONNECTING';setTimeout(go,clamp(1000*Math.pow(2,Math.min(attempt,6)),1000,30000))};
       ws.onerror=function(){try{ws.close()}catch(e){}};
     }catch(e){setTimeout(go,3000)}
   }
@@ -1066,24 +979,27 @@ function restSpot(){
   }).catch(function(){S.feed.BN_SPOT='STALE'});
 }
 async function portfolioBootstrap(){
-  if(P.lastBootstrap&&now()-P.lastBootstrap<300000)return;
-  P.lastBootstrap=now();
+  var t=now();
+  if(P.lastBootstrap&&t-P.lastBootstrap<15000)return;
+  P.lastBootstrap=t;
   var list=P.universe.slice(),done=0;
-  for(var start=0;start<list.length;start+=3){
-    var batch=list.slice(start,start+3);
+  for(var start=0;start<list.length;start+=5){
+    var batch=list.slice(start,start+5);
     await Promise.all(batch.map(async function(coin){
-      if(P.bootstrapped[coin]&&now()-P.bootstrapped[coin]<1800000)return;
+      var a=ensureAsset(coin);
+      if(a.hl.candles.length>=80)return;
       try{
         var end=now()-60000,res=await hl({type:'candleSnapshot',req:{coin:coin,interval:'1m',startTime:end-500*60000,endTime:end}});
-        var a=ensureAsset(coin);
         if(Array.isArray(res)&&res.length>=80){
           a.hl.candles=res.map(function(q){return{t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v}}).sort(function(x,y){return x.t-y.t}).slice(-1000);
-          a.feed.HL_CANDLE='OK';P.bootstrapped[coin]=now();done++;
+          if(!finite(a.hl.price))a.hl.price=a.hl.candles[a.hl.candles.length-1].c;
+          a.feed.HL_CANDLE='OK';done++;
         }
       }catch(e){}
     }));
   }
   if(done)save();
+  return done;
 }
 async function warmStart(){
   var key=S.coin,meta=DB.pretrain[key]||{}; meta.h=meta.h||{};
@@ -1222,7 +1138,7 @@ async function boot(){
     restSync().then(function(){portfolioBootstrap().then(function(){portfolioScan()}).catch(function(){});dashboard()}).catch(function(e){diagError('REST',e);dashboard()});
     warmStart().then(function(){dashboard()}).catch(function(e){diagError('WARM_START',e);dashboard()});
     setInterval(function(){
-      if(now()-S.lastRest>15000)restSync().catch(function(e){diagError('REST_LOOP',e)});
+      if(now()-S.lastRest>15000)restSync().then(function(){return portfolioBootstrap()}).then(function(){portfolioScan()}).catch(function(e){diagError('REST_LOOP',e)});
       restSpot();
       updatePortfolioPositions();updatePaperPositions();resolve().catch(function(e){diagError('RESOLVE',e)});
       try{dashboard()}catch(e){diagError('RENDER_LOOP',e)}
