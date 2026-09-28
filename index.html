@@ -24,7 +24,7 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
 .ok{color:var(--u)}.warn{color:var(--n)}.bad{color:var(--d)}.diag{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;white-space:pre-wrap}.selftest{border:1px solid var(--u);color:var(--u)}.chart{height:390px}.chart canvas{width:100%;height:100%;display:block}
 .table{width:100%;border-collapse:collapse;font-size:12px}.table th,.table td{padding:6px;border-bottom:1px solid #1c3038;text-align:right}.table th:first-child,.table td:first-child{text-align:left}
 .smallcaps{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--m)}.green{color:var(--u)}.red{color:var(--d)}.amber{color:var(--n)}
-.kpi{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}.capitalGrid{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}.portfolioRow{display:grid;grid-template-columns:1fr .9fr .7fr .8fr .8fr 1fr;gap:6px;padding:7px 9px;border-top:1px solid var(--l);align-items:center}.portfolioRow.header{font-weight:700;color:var(--m);border-top:0}.portfolioGrid{border:1px solid var(--l);border-radius:10px;overflow:hidden}.capitalBox{padding:10px;border:1px solid var(--l);background:#09151b;border-radius:10px}.capitalBox b{font-size:18px}.capitalSub{margin-top:3px;font-size:11px;color:var(--m)}.kbox{padding:9px;border:1px solid var(--l);background:#09151b;border-radius:9px}.kbox b{font-size:17px}
+.kpi{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}.capitalGrid{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}.portfolioRow{display:grid;grid-template-columns:1.15fr 1fr .8fr .8fr 1fr 1fr 1fr 1fr .9fr 1fr .9fr 1fr;gap:6px;padding:7px 9px;border-top:1px solid var(--l);align-items:center;min-width:1120px}.portfolioRow.header{font-weight:700;color:var(--m);border-top:0}.portfolioGrid{border:1px solid var(--l);border-radius:10px;overflow:hidden}.capitalBox{padding:10px;border:1px solid var(--l);background:#09151b;border-radius:10px}.capitalBox b{font-size:18px}.capitalSub{margin-top:3px;font-size:11px;color:var(--m)}.kbox{padding:9px;border:1px solid var(--l);background:#09151b;border-radius:9px}.kbox b{font-size:17px}
 @media(max-width:1080px){.grid,.hero{grid-template-columns:1fr}.order{grid-template-columns:repeat(3,1fr)}.stats{grid-template-columns:1fr 1fr}.health{grid-template-columns:repeat(4,1fr)}.learn{grid-template-columns:repeat(4,1fr)}}
 @media(max-width:650px){.wrap{padding:8px}.order{grid-template-columns:1fr 1fr}.matrix,.book{grid-template-columns:1fr}.health,.learn,.kpi,.capitalGrid{grid-template-columns:1fr 1fr}.dir{font-size:44px}}
 </style>
@@ -192,7 +192,7 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
   </div>
   <div id="portfolioGrid" class="portfolioGrid"></div>
   <div id="portfolioNote" class="note" style="margin-top:9px">
-    Scanner des perpétuels Hyperliquid classés par volume nominal 24 h. Jusqu'à 15 actifs surveillés et 10 positions paper simultanées. Chaque position est plafonnée à 20% de l'equity en marge, avec un levier paper maximal de 5×; le risque par idée reste celui du champ Risque. Le but est de permettre plusieurs positions sans qu'un seul signal consomme tout le capital.
+    Scanner des perpétuels Hyperliquid classés par volume nominal 24 h. Jusqu'à 15 actifs surveillés et 10 positions paper simultanées. Pour chaque crypto : prix actuel, entrée, SL, TP et PnL sont affichés. Le PnL latent correspond à ce que le compte aurait après sortie au prix actuel, frais entrée + sortie estimés inclus; le réalisé additionne les trades déjà clôturés. Aucune exécution réelle.
   </div>
 </div>
 </section>
@@ -424,24 +424,48 @@ function updatePortfolioPositions(){
     if(!done&&finite(a.hl.price)){var t=now(),sl2=dir>0?a.hl.price<=pos.sl:a.hl.price>=pos.sl,tp2=dir>0?a.hl.price>=pos.tp:a.hl.price<=pos.tp;if(sl2||tp2)portfolioSettle(coin,sl2?pos.sl:pos.tp,sl2?'SL':'TP',t);else pos.lastTs=t}
   }
 }
+function portfolioRealizedByCoin(p,coin){
+  var sum=0,log=p&&p.log||[];
+  for(var i=0;i<log.length;i++)if(log[i]&&log[i].coin===coin&&finite(log[i].net))sum+=log[i].net;
+  return sum;
+}
+function portfolioMark(coin){
+  var a=ensureAsset(coin),price=finite(a.hl.price)?a.hl.price:NaN,pos=portfolioState().positions&&portfolioState().positions[coin],unreal=NaN;
+  if(pos&&finite(price)){
+    var dir=pos.direction==='LONG'?1:-1,fee=pos.paperFee!=null?pos.paperFee:S.fee;
+    var gross=pos.size*(price-pos.entry)*dir;
+    var fees=(Math.abs(pos.size*pos.entry)+Math.abs(pos.size*price))*(fee/10000);
+    unreal=gross-fees;
+  }
+  var realized=portfolioRealizedByCoin(portfolioState(),coin);
+  return{price:price,pos:pos,realized:realized,unreal:unreal,total:realized+(finite(unreal)?unreal:0)};
+}
 function portfolioScan(){
-  P.h=S.h;var h=P.h,p=portfolioState(),rows=[];
-  var positions=p.positions||{};
+  P.h=S.h;var h=P.h,p=portfolioState(),rows=[],positions=p.positions||{};
   for(var i=0;i<P.universe.length;i++){
-    var coin=P.universe[i],a=ensureAsset(coin),hasData=a.hl.candles.length>=80&&finite(a.hl.price);
-    if(!hasData){rows.push({coin:coin,volume:P.volume[coin]||0,action:'CHARGEMENT',p:NaN,edge:NaN,ev:NaN,pos:!!positions[coin]});continue}
+    var coin=P.universe[i],a=ensureAsset(coin),mk=portfolioMark(coin),hasData=a.hl.candles.length>=80&&finite(a.hl.price);
+    if(!hasData){
+      rows.push({coin:coin,volume:P.volume[coin]||0,action:'CHARGEMENT',p:NaN,edge:NaN,ev:NaN,pos:!!positions[coin],price:mk.price,entry:mk.pos?mk.pos.entry:NaN,sl:mk.pos?mk.pos.sl:NaN,tp:mk.pos?mk.pos.tp:NaN,pnl:mk.total,unreal:mk.unreal,realized:mk.realized});
+      continue;
+    }
     try{
-      var out=withAsset(coin,function(){S.capital=p.capital;var f=feats(),m=mixed(h,f),pl=orderPlan(h,f,m);return{f:f,pl:pl}});
-      var pl=out.pl,act=(pl.direction==='LONG'||pl.direction==='SHORT')?pl.direction:'NO TRADE';
-      if(act!=='NO TRADE'&&!positions[coin])portfolioOpen(coin,h,out.f,pl);
-      rows.push({coin:coin,volume:P.volume[coin]||0,action:act,p:finite(pl.pd)?pl.pd:NaN,edge:finite(pl.edge)?pl.edge:NaN,ev:finite(pl.ev)?pl.ev:NaN,pos:!!positions[coin]});
-    }catch(e){rows.push({coin:coin,volume:P.volume[coin]||0,action:'ERROR',p:NaN,edge:NaN,ev:NaN,pos:!!positions[coin]})}
+      var out=withAsset(coin,function(){S.capital=p.capital;var f=feats(),m=mixed(h,f),pl=orderPlan(h,f);return{f:f,pl:pl}});
+      var pl=out.pl,act=(pl.direction==='LONG'||pl.direction==='SHORT')?pl.direction:'NO TRADE',existing=positions[coin];
+      if(act!=='NO TRADE'&&!existing)portfolioOpen(coin,h,out.f,pl);
+      mk=portfolioMark(coin);existing=portfolioState().positions&&portfolioState().positions[coin];
+      rows.push({coin:coin,volume:P.volume[coin]||0,action:act,p:finite(pl.pd)?pl.pd:NaN,edge:finite(pl.edge)?pl.edge:NaN,ev:finite(pl.ev)?pl.ev:NaN,pos:!!existing,
+        price:mk.price,entry:existing?existing.entry:(act!=='NO TRADE'?pl.entry:NaN),sl:existing?existing.sl:(act!=='NO TRADE'?pl.sl:NaN),tp:existing?existing.tp:(act!=='NO TRADE'?pl.tp:NaN),
+        pnl:mk.total,unreal:mk.unreal,realized:mk.realized});
+    }catch(e){
+      mk=portfolioMark(coin);
+      rows.push({coin:coin,volume:P.volume[coin]||0,action:'ERROR',p:NaN,edge:NaN,ev:NaN,pos:!!positions[coin],price:mk.price,entry:mk.pos?mk.pos.entry:NaN,sl:mk.pos?mk.pos.sl:NaN,tp:mk.pos?mk.pos.tp:NaN,pnl:mk.total,unreal:mk.unreal,realized:mk.realized});
+    }
   }
   P.signalsRows=rows;P.lastScan=now();save();renderPortfolio();
 }
 function renderPortfolio(){
   var p=portfolioState(),used=portfolioMarginUsed(p),free=Math.max(0,p.capital-used),risk=portfolioRiskOpen(p),ks=Object.keys(p.positions||{}),rows=(P.signalsRows&&P.signalsRows.length)?P.signalsRows.slice():[];
-  if(!rows.length)rows=P.universe.map(function(coin){return{coin:coin,volume:P.volume[coin]||0,action:'CHARGEMENT',p:NaN,edge:NaN,ev:NaN,pos:!!p.positions[coin]}});
+  if(!rows.length)rows=P.universe.map(function(coin){var mk=portfolioMark(coin);return{coin:coin,volume:P.volume[coin]||0,action:'CHARGEMENT',p:NaN,edge:NaN,ev:NaN,pos:!!p.positions[coin],price:mk.price,entry:mk.pos?mk.pos.entry:NaN,sl:mk.pos?mk.pos.sl:NaN,tp:mk.pos?mk.pos.tp:NaN,pnl:mk.total,unreal:mk.unreal,realized:mk.realized}});
   rows.sort(function(a,b){return(b.volume||0)-(a.volume||0)});
   $('portCapital').textContent=nfmt(p.capital,2)+' USDC';
   $('portUsed').textContent=nfmt(used,2)+' USDC';
@@ -449,10 +473,10 @@ function renderPortfolio(){
   $('portSlots').textContent=ks.length+' / '+P.maxSlots;
   $('portRisk').textContent=nfmt(risk,2)+' USDC';
   $('portfolioBadge').textContent=P.universe.length+' ACTIFS · '+ks.length+'/'+P.maxSlots+' SLOTS';
-  var html='<div class="portfolioRow header"><div>Actif</div><div>Signal</div><div>Prob.</div><div>Edge</div><div>EV</div><div>État</div></div>';
+  var html='<div class="portfolioRow header"><div>Actif</div><div>Prix</div><div>Signal</div><div>Prob.</div><div>Entrée</div><div>SL</div><div>TP</div><div>PnL total</div><div>PnL latent</div><div>Réalisé</div><div>Edge</div><div>État</div></div>';
   for(var i=0;i<rows.length;i++){
-    var q=rows[i],cls=q.action==='LONG'?'up':q.action==='SHORT'?'down':'neu',st=q.pos?'POSITION':q.action==='CHARGEMENT'?'DONNÉES':'SURVEILLE';
-    html+='<div class="portfolioRow"><b>'+q.coin+'</b><b class="'+cls+'">'+q.action+'</b><span>'+(finite(q.p)?(q.p*100).toFixed(1)+'%':'—')+'</span><span>'+(finite(q.edge)?((q.edge*100).toFixed(1))+' pt':'—')+'</span><span>'+(finite(q.ev)?(q.ev*10000).toFixed(2)+' bps':'—')+'</span><span>'+st+'</span></div>';
+    var q=rows[i],cls=q.action==='LONG'?'up':q.action==='SHORT'?'down':'neu',pcls=finite(q.pnl)?(q.pnl>=0?'up':'down'):'neu',ucls=finite(q.unreal)?(q.unreal>=0?'up':'down'):'neu',rcls=finite(q.realized)?(q.realized>=0?'up':'down'):'neu',st=q.pos?'POSITION':q.action==='CHARGEMENT'?'DONNÉES':'SURVEILLE';
+    html+='<div class="portfolioRow"><b>'+q.coin+'</b><span>'+nfmt(q.price,2)+'</span><b class="'+cls+'">'+q.action+'</b><span>'+(finite(q.p)?(q.p*100).toFixed(1)+'%':'—')+'</span><span>'+nfmt(q.entry,2)+'</span><span>'+nfmt(q.sl,2)+'</span><span>'+nfmt(q.tp,2)+'</span><b class="'+pcls+'">'+nfmt(q.pnl,2)+'</b><span class="'+ucls+'">'+nfmt(q.unreal,2)+'</span><span class="'+rcls+'">'+nfmt(q.realized,2)+'</span><span>'+(finite(q.edge)?((q.edge*100).toFixed(1))+' pt':'—')+'</span><span>'+st+'</span></div>';
   }
   $('portfolioGrid').innerHTML=html;
 }
