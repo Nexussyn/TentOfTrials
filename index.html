@@ -400,7 +400,8 @@ function portfolioOpen(coin,h,f,pl){
   if(P.cooldown[coin]&&t<P.cooldown[coin])return false;
   var riskCash=p.capital*(S.risk/100),riskDist=Math.abs(pl.entry-pl.sl),feePerUnit=(Math.abs(pl.entry)+Math.abs(pl.sl))*(S.fee/10000),size=riskDist>0&&finite(feePerUnit)?riskCash/(riskDist+feePerUnit):NaN;
   if(!finite(size)||size<=0)return false;
-  var notional=Math.abs(size*pl.entry),margin=notional/P.maxLeverage,free=Math.max(0,p.capital-portfolioMarginUsed(p));
+  var notional=Math.abs(size*pl.entry),margin=notional/P.maxLeverage,free=Math.max(0,p.capital-portfolioMarginUsed(p)),marginCap=p.capital*P.maxMarginPct;
+  if(margin>marginCap){size=(marginCap*P.maxLeverage)/pl.entry;notional=Math.abs(size*pl.entry);margin=notional/P.maxLeverage}
   if(margin>free*0.98){size=(free*0.98*P.maxLeverage)/pl.entry;notional=Math.abs(size*pl.entry);margin=notional/P.maxLeverage}
   if(!(margin>0&&margin<=free))return false;
   p.positions[coin]={coin:coin,h:h,ts:t,direction:pl.direction,entry:pl.entry,sl:pl.sl,tp:pl.tp,size:size,notional:notional,margin:margin,riskCash:riskCash,paperFee:S.fee,lastTs:t,prob:pl.pd,edge:pl.edge,ev:pl.ev};
