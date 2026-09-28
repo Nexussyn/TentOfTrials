@@ -1,0 +1,111 @@
+name: CDE browser and live smoke
+on:
+  push:
+    paths:
+      - 'index.html'
+      - '.github/workflows/cde-smoke.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Chromium + Playwright
+        run: |
+          npm init -y
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+      - name: Local self-test (no network)
+        run: |
+          python3 -m http.server 4173 --bind 127.0.0.1 >/tmp/cde-http.log 2>&1 &
+          node <<'NODE'
+          const { chromium } = require('playwright');
+          (async()=>{
+            const b=await chromium.launch({headless:true});
+            const p=await b.newPage();
+            const errors=[];
+            p.on('pageerror',e=>errors.push('PAGEERROR '+e.stack));
+            p.on('console',m=>{if(m.type()==='error')errors.push('CONSOLE '+m.text())});
+            await p.goto('http://127.0.0.1:4173/index.html?selftest=1',{waitUntil:'domcontentloaded',timeout:20000});
+            await p.waitForTimeout(1500);
+            const s=await p.evaluate(()=>({
+              title:document.title,
+              dir:document.getElementById('dir')?.textContent,
+              price:document.getElementById('kPrice')?.textContent,
+              journal:document.getElementById('journal')?.textContent,
+              capital:document.getElementById('capitalCards')?.textContent,
+              health:document.getElementById('health')?.textContent,
+              boot:document.getElementById('bootBanner')?.textContent
+            }));
+            console.log(JSON.stringify({s,errors},null,2));
+            if(s.title!=='Crypto Direction Engine — V13.2')throw new Error('wrong title');
+            if(s.dir==='CHARGEMENT'||!s.dir)throw new Error('decision did not render');
+            if(s.price==='—'||!s.price)throw new Error('price did not render');
+            if(!s.journal.includes('5m')||!s.journal.includes('1j'))throw new Error('journal incomplete');
+            if(!s.capital.includes('1000')||!s.capital.includes('1j'))throw new Error('capital incomplete');
+            if(errors.length)throw new Error(errors.join('\n'));
+            if(!s.boot.includes('CDE SELFTEST PASS'))throw new Error('selftest banner missing');
+            await b.close();
+          })().catch(e=>{console.error(e.stack||e);process.exit(1)});
+          NODE
+      - name: Live API connectivity
+        run: |
+          python3 -m pip install --quiet requests websocket-client
+          python3 - <<'PY'
+          import json,time,requests,websocket
+          t=int(time.time()*1000)
+          h='https://api.hyperliquid.xyz/info'
+          r=requests.post(h,json={'type':'metaAndAssetCtxs'},timeout=10);r.raise_for_status();d=r.json();assert d and d[0].get('universe')
+          r=requests.post(h,json={'type':'candleSnapshot','req':{'coin':'BTC','interval':'1m','startTime':t-3600000,'endTime':t}},timeout=10);r.raise_for_status();assert len(r.json())>10
+          for u in [
+            'https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT',
+            'https://fapi.binance.com/fapi/v1/openInterest?symbol=BTCUSDT',
+            'https://api.binance.com/api/v3/aggTrades?symbol=BTCUSDT&limit=5']:
+            rr=requests.get(u,timeout=10);rr.raise_for_status()
+          ws=websocket.create_connection('wss://api.hyperliquid.xyz/ws',timeout=8);ws.send(json.dumps({'method':'subscribe','subscription':{'type':'allMids'}}))
+          ok=False;deadline=time.time()+8
+          while time.time()<deadline:
+            m=json.loads(ws.recv())
+            if m.get('channel')=='allMids' and m.get('data',{}).get('mids',{}).get('BTC') is not None:ok=True;break
+          ws.close();assert ok
+          ws=websocket.create_connection('wss://fstream.binance.com/stream?streams=btcusdt@aggTrade',timeout=8)
+          ok=False;deadline=time.time()+8
+          while time.time()<deadline:
+            m=json.loads(ws.recv());d=m.get('data',{})
+            if m.get('stream')=='btcusdt@aggTrade' and d.get('s')=='BTCUSDT':ok=True;break
+          ws.close();assert ok
+          print('LIVE API + WS OK')
+          PY
+      - name: Live browser smoke
+        run: |
+          node <<'NODE'
+          const { chromium } = require('playwright');
+          (async()=>{
+            const b=await chromium.launch({headless:true});
+            const p=await b.newPage();
+            const errors=[];
+            p.on('pageerror',e=>errors.push('PAGEERROR '+e.stack));
+            p.on('console',m=>{if(m.type()==='error')errors.push('CONSOLE '+m.text())});
+            await p.goto('http://127.0.0.1:4173/index.html?live-smoke=1',{waitUntil:'domcontentloaded',timeout:20000});
+            await p.waitForTimeout(12000);
+            const s=await p.evaluate(()=>({
+              dir:document.getElementById('dir')?.textContent,
+              price:document.getElementById('kPrice')?.textContent,
+              health:document.getElementById('health')?.textContent,
+              journal:document.getElementById('journal')?.textContent,
+              boot:document.getElementById('bootBanner')?.textContent
+            }));
+            console.log(JSON.stringify({s,errors},null,2));
+            if(!s.price||s.price==='—')throw new Error('live price missing');
+            if(!s.dir||s.dir==='CHARGEMENT')throw new Error('live dashboard stuck in CHARGEMENT');
+            if(!s.health||s.health.length<50)throw new Error('health panel empty');
+            if(errors.length)throw new Error(errors.join('\n'));
+            await b.close();
+          })().catch(e=>{console.error(e.stack||e);process.exit(1)});
+          NODE
