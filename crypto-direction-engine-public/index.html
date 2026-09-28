@@ -484,12 +484,12 @@ function restSpot(){
   }).catch(function(){S.feed.BN_SPOT='STALE'});
 }
 async function warmStart(){
-  var key=S.coin,meta=DB.pretrain[key]||{};
-  if(meta.done){$('learningNote').textContent='PRETRAIN déjà présent pour '+S.coin+' : le Warm-start ne réinitialise plus le live. Utilise un navigateur/localStorage vierge pour repartir de zéro.';return}
-  $('modeBadge').textContent='PRETRAIN';$('learningNote').textContent='Warm-start en cours : historique 1m prix, sans prétendre reconstruire l’ancien L2 Hyperliquid.';
-  meta.started=now();meta.n=0;DB.pretrain[key]=meta;save();
+  var key=S.coin,meta=DB.pretrain[key]||{}; meta.h=meta.h||{};
+  if(H.every(function(h){return meta.h[h]&&meta.h[h].done})){ $('learningNote').textContent='PRETRAIN déjà présent pour '+S.coin+' : le Warm-start ne réinitialise plus le live.'; $('modeBadge').textContent='LIVE'; dashboard(); return; }
+  $('modeBadge').textContent='PRETRAIN';$('learningNote').textContent='Warm-start en cours : historique 1m prix. Le L2 historique complet n’est pas simulé.';
+  meta.started=meta.started||now();DB.pretrain[key]=meta;save();
   for(var hi=0;hi<H.length;hi++){
-    var h=H[hi];
+    var h=H[hi]; meta.h[h]=meta.h[h]||{n:0,done:false}; if(meta.h[h].done)continue;
     try{
       var end=now()-2*h*60000,start=end-5*86400000,res=await hl({type:'candleSnapshot',req:{coin:S.coin,interval:'1m',startTime:start,endTime:end}}),bars=(res||[]).map(function(q){return{t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v}}).sort(function(a,b){return a.t-b.t});
       if(bars.length<500)continue;
@@ -501,11 +501,12 @@ async function warmStart(){
         meta.n++;
       }
       bm.obs=bm.obs.slice(-300);fm.obs=fm.obs.slice(-300);
-      calibrate(bm);calibrate(fm);
+      calibrate(bm);calibrate(fm); meta.h[h].n=bm.seen; meta.h[h].done=true;
     }catch(e){}
-    $('hist').textContent=meta.n;await new Promise(function(r){setTimeout(r,0)});
+    var total=H.reduce(function(s,hh){return s+((meta.h[hh]&&meta.h[hh].n)||0)},0);meta.n=total;DB.pretrain[key]=meta;save();
+    $('hist').textContent=(meta.h[S.h]&&meta.h[S.h].n)||0;await new Promise(function(r){setTimeout(r,0)});
   }
-  meta.done=true;meta.finished=now();DB.pretrain[key]=meta;save();$('modeBadge').textContent='LIVE';$('learningNote').textContent='PRETRAIN terminé : transfert prix. L2/flow/PASR sont appris uniquement sur OOS live, sans données historiques inventées.';dashboard();
+  meta.done=H.every(function(hh){return meta.h[hh]&&meta.h[hh].done});meta.finished=now();DB.pretrain[key]=meta;save();$('modeBadge').textContent='LIVE';$('learningNote').textContent='PRETRAIN terminé : transfert prix. L2/flow/PASR sont appris uniquement sur OOS live, sans données historiques inventées.';dashboard();
 }
 function renderEvidence(f,m){
   var arr=[
@@ -532,7 +533,7 @@ function renderHealth(){
 }
 function journal(){
   $('journal').innerHTML=H.map(function(h){
-    var s=statsFor(h),pre=DB.pretrain[S.coin]&&DB.pretrain[S.coin].n||0,ver=pasrVerdict(h);
+    var s=statsFor(h),pre=(DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[h]&&DB.pretrain[S.coin].h[h].n)||0,ver=pasrVerdict(h);
     return'<tr><td>'+h+'m</td><td>'+pre+'</td><td>'+s.n+'</td><td>'+nfmt(s.b,4)+'</td><td>'+nfmt(s.ll,4)+'</td><td>'+pct(s.hit,1)+'</td><td>'+nfmt(s.delta,4)+'</td><td>'+ver+'</td></tr>';
   }).join('');
 }
@@ -563,11 +564,11 @@ function dashboard(){
   $('derSt').textContent=fresh(S.hl.lastCtx,30000)&&fresh(S.bn.lastMark,5000)?'live':'dégradé';$('l2st').textContent=fresh(S.hl.lastBook,5000)?'live':'stale';
   var fm=model(S.h,'full'),w=fm.w[2]&&fm.w[2][FEATS.indexOf('pasr')*2]||0;
   $('c4').textContent=finite(f.pasr)?f.pasr.toFixed(3):'—';$('pasrW').textContent=w.toFixed(4);$('deltaB').textContent=finite(st.delta)?st.delta.toFixed(4):'—';$('pasrN').textContent=st.n;$('pasrV').textContent=pv;$('pasrState').textContent=pv;$('bucketN').textContent=f.pasrN;
-  $('hist').textContent=DB.pretrain[S.coin]&&DB.pretrain[S.coin].n||0;$('live').textContent=st.n;$('brier').textContent=nfmt(st.b,4);$('logloss').textContent=nfmt(st.ll,4);$('hit').textContent=pct(st.hit,1);$('roll').textContent=nfmt(st.roll,4);$('pend').textContent=(DB.pending[S.coin+'_'+S.h]||[]).length;
+  $('hist').textContent=(DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[S.h]&&DB.pretrain[S.coin].h[S.h].n)||0;$('live').textContent=st.n;$('brier').textContent=nfmt(st.b,4);$('logloss').textContent=nfmt(st.ll,4);$('hit').textContent=pct(st.hit,1);$('roll').textContent=nfmt(st.roll,4);$('pend').textContent=(DB.pending[S.coin+'_'+S.h]||[]).length;
   $('learnState').textContent=st.n<30?'LEARNING':st.n<100?'CALIBRATING': 'ADAPTIVE';
   $('kPrice').textContent=nfmt(S.hl.price,2);$('kDQ').textContent=q+'/100';$('kMix').textContent=Math.round(m.alpha*100)+'% FULL';var ages=[S.hl.lastBook,S.hl.lastTrades,S.bn.lastPerp,S.bn.lastMark].filter(function(x){return x>0}).map(function(x){return Math.max(0,now()-x)/1000});$('kFresh').textContent=ages.length?Math.round(Math.max.apply(null,ages))+'s':'—';
   $('kTarget').textContent=finite(pl.pd)?(pl.candidate+' '+(pl.pd*100).toFixed(1)+'%'): '—';
-  $('chartInfo').textContent='HL '+nfmt(S.hl.price)+' · BN '+nfmt(S.bn.price);renderHealth();journal();$('audit').textContent='PRETRAIN prix = '+(DB.pretrain[S.coin]&&DB.pretrain[S.coin].n||0)+' labels, non présenté comme OOS full. LIVE OOS = prévision gelée à t0 puis résolue au prix observé à t0+h. BASE exclut les features microstructurelles/PASR; FULL les apprend en live. PASR = feature expérimentale, verdict par différence Brier appariée + IC approximatif à 95 %. Warm-start ne réinitialise plus le live.';
+  $('chartInfo').textContent='HL '+nfmt(S.hl.price)+' · BN '+nfmt(S.bn.price);renderHealth();journal();$('audit').textContent='PRETRAIN prix = '+((DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[S.h]&&DB.pretrain[S.coin].h[S.h].n)||0)+' labels pour '+S.h+'m; non présenté comme OOS full. LIVE OOS = prévision gelée à t0 puis résolue au prix observé à t0+h. BASE exclut les features microstructurelles/PASR; FULL les apprend en live. PASR = feature expérimentale, verdict par différence Brier appariée + IC approximatif à 95 %. Warm-start ne réinitialise plus le live.';
 }
 async function boot(){
   S.coin=$('coin').value;S.h=+$('hor').value;S.capital=+$('capital').value||1000;S.risk=+$('risk').value||.5;
