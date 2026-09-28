@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Crypto Direction Engine — V12</title>
+<title>Crypto Direction Engine — V12.5</title>
 <style>
 :root{--bg:#061016;--p:#0c1a22;--p2:#09161d;--l:#243843;--t:#edf4f7;--m:#8ea3ad;--u:#43d19d;--d:#ff7082;--n:#f0bf55;--c:#67d7ef}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 15% 0,#122a32,#061016 42%,#050b0f);color:var(--t);font:14px/1.4 system-ui,-apple-system,Segoe UI,sans-serif}
@@ -32,8 +32,8 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
 <body>
 <header class="top">
   <div>
-    <div class="brand">CRYPTO DIRECTION ENGINE · V12</div>
-    <div class="tag">Hyperliquid primaire · Binance cross-venue · self-evaluating · aucune exécution réelle</div>
+    <div class="brand">CRYPTO DIRECTION ENGINE · V12.5</div>
+    <div class="tag">Hyperliquid primaire · Binance cross-venue · self-evaluating · persistance double · aucune exécution réelle</div>
   </div>
   <div class="ctrl">
     <select id="coin" title="Marché analysé"><option>BTC</option><option>ETH</option><option>SOL</option></select>
@@ -205,7 +205,7 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
 
 <div class="tiny" style="padding:12px 2px">
   Hyperliquid public WS/Info API + Binance public market data. Aucun compte, aucune clé, aucun ordre réel.
-  Le warm-start public utilise l'historique de bougies sur la fenêtre publique maximale pour pré-entraîner le sous-espace prix; les features L2 historiques complètes nécessitent les archives Hyperliquid et ne sont donc jamais simulées comme si elles existaient.
+  Le warm-start public utilise l'historique de bougies sur la fenêtre publique maximale pour pré-entraîner le sous-espace prix; les features L2 historiques complètes nécessitent les archives Hyperliquid et ne sont donc jamais simulées comme si elles existaient. Historique, modèles, OOS, capital papier et pending sont persistés en localStorage + IndexedDB.
 </div>
 </main>
 
@@ -217,15 +217,102 @@ var HLWS='wss://api.hyperliquid.xyz/ws', HLAPI='https://api.hyperliquid.xyz/info
 var BNWS='wss://fstream.binance.com/stream', BNAPI='https://fapi.binance.com';
 var BN_SPOT='https://api.binance.com/api/v3/aggTrades';
 var H=[5,15,60,240,1440], FEATS=['r1','r5','r15','r60','ema','l2','micro','flow','absorption','funding','basis','spotPerp','doi','liq','pasr'];
-var STORE='cde_v11_learning_v1';
+var STORE='cde_persistent_v2';
+var LEGACY_STORES=['cde_v11_learning_v1','cde_public_learning_v10'];
+var IDB_NAME='CDE_PERSISTENT_DB',IDB_VERSION=1,IDB_STORE='snapshots';
 var now=function(){return Date.now()};
 var clamp=function(x,a,b){return Math.max(a,Math.min(b,x))};
 var finite=function(x){return Number.isFinite(x)};
 var pct=function(x,d){return finite(x)?(100*x).toFixed(d==null?1:d)+'%':'—'};
 var nfmt=function(x,d){return finite(x)?Number(x).toLocaleString('fr-FR',{maximumFractionDigits:d==null?2:d}):'—'};
 
-var DB=(function(){try{return JSON.parse(localStorage.getItem(STORE)||'{}')}catch(e){return{}}})();
-DB.models=DB.models||{}; DB.pending=DB.pending||{}; DB.obs=DB.obs||{}; DB.grid=DB.grid||{}; DB.pretrain=DB.pretrain||{}; DB.pasr=DB.pasr||{}; DB.paper=DB.paper||{};
+function blankDB(){return{models:{},pending:{},obs:{},grid:{},pretrain:{},pasr:{},paper:{},updatedAt:0}}
+function normalizeDB(d){
+  d=d&&typeof d==='object'?d:blankDB();
+  d.models=d.models||{};d.pending=d.pending||{};d.obs=d.obs||{};d.grid=d.grid||{};d.pretrain=d.pretrain||{};d.pasr=d.pasr||{};d.paper=d.paper||{};d.updatedAt=Number(d.updatedAt)||0;
+  return d;
+}
+function readStore(k){try{var x=JSON.parse(localStorage.getItem(k)||'null');return normalizeDB(x)}catch(e){return blankDB()}}
+function richness(d){
+  var n=0;
+  Object.values(d.obs||{}).forEach(function(a){n+=Array.isArray(a)?a.length:0});
+  Object.values(d.pending||{}).forEach(function(a){n+=Array.isArray(a)?a.length:0});
+  Object.values(d.paper||{}).forEach(function(p){n+=(p.trades||0)+(p.log||[]).length});
+  return n+(d.updatedAt||0)*1e-12;
+}
+function mergeArraysUnique(a,b){
+  var m={};(a||[]).concat(b||[]).forEach(function(x){if(x&&x.ts!=null)m[String(x.ts)]=x;});
+  return Object.values(m).sort(function(x,y){return (+x.ts||0)-(+y.ts||0)}).slice(-500);
+}
+function mergeDB(base,src){
+  src=normalizeDB(src);
+  Object.keys(src.obs).forEach(function(k){base.obs[k]=mergeArraysUnique(base.obs[k],src.obs[k])});
+  Object.keys(src.pending).forEach(function(k){base.pending[k]=mergeArraysUnique(base.pending[k],src.pending[k]).slice(-250)});
+  Object.keys(src.models).forEach(function(k){
+    var a=base.models[k],b=src.models[k];
+    if(!a||(b.liveSeen||0)>(a.liveSeen||0)||(b.seen||0)>(a.seen||0))base.models[k]=b;
+  });
+  Object.keys(src.pretrain).forEach(function(k){
+    var a=base.pretrain[k],b=src.pretrain[k];
+    if(!a||richness({pretrain:{},paper:{},obs:{},pending:{},updatedAt:(b.n||0)})>richness({pretrain:{},paper:{},obs:{},pending:{},updatedAt:(a.n||0)}))base.pretrain[k]=b;
+  });
+  Object.keys(src.grid).forEach(function(k){
+    var a=base.grid[k],b=src.grid[k],an=(a||[]).reduce(function(s,x){return s+(x.n||0)},0),bn=(b||[]).reduce(function(s,x){return s+(x.n||0)},0);
+    if(!a||bn>an)base.grid[k]=b;
+  });
+  Object.keys(src.paper).forEach(function(k){
+    var a=base.paper[k],b=src.paper[k];
+    if(!a||(b.trades||0)>(a.trades||0)||(b.log||[]).length>(a.log||[]).length)base.paper[k]=b;
+  });
+  Object.keys(src.pasr).forEach(function(k){if(base.pasr[k]==null)base.pasr[k]=src.pasr[k]});
+  base.updatedAt=Math.max(base.updatedAt||0,src.updatedAt||0);
+  return base;
+}
+var DB=(function(){
+  var stable=readStore(STORE);
+  if((stable.updatedAt||0)===0){
+    LEGACY_STORES.forEach(function(k){var old=readStore(k);if(richness(old)>0)stable=mergeDB(stable,old)});
+  }
+  return normalizeDB(stable);
+})();
+var idbTimer=0;
+function idbPutSnapshot(){
+  if(!window.indexedDB)return;
+  try{
+    var req=indexedDB.open(IDB_NAME,IDB_VERSION);
+    req.onupgradeneeded=function(){var db=req.result;if(!db.objectStoreNames.contains(IDB_STORE))db.createObjectStore(IDB_STORE,{keyPath:'id'})};
+    req.onsuccess=function(){var db=req.result;try{var tx=db.transaction(IDB_STORE,'readwrite');tx.objectStore(IDB_STORE).put({id:'state',updatedAt:DB.updatedAt||now(),db:DB});tx.oncomplete=function(){db.close()}}catch(e){try{db.close()}catch(_){} }};
+  }catch(e){}
+}
+function save(){
+  DB.updatedAt=now();
+  try{localStorage.setItem(STORE,JSON.stringify(DB))}catch(e){}
+  clearTimeout(idbTimer);idbTimer=setTimeout(idbPutSnapshot,250);
+}
+async function hydratePersistent(){
+  if(!window.indexedDB){save();return}
+  await new Promise(function(resolve){
+    var req;
+    try{req=indexedDB.open(IDB_NAME,IDB_VERSION)}catch(e){resolve();return}
+    req.onupgradeneeded=function(){var db=req.result;if(!db.objectStoreNames.contains(IDB_STORE))db.createObjectStore(IDB_STORE,{keyPath:'id'})};
+    req.onsuccess=function(){
+      var db=req.result;
+      try{
+        var tx=db.transaction(IDB_STORE,'readonly'),gr=tx.objectStore(IDB_STORE).get('state');
+        gr.onsuccess=function(){
+          var rec=gr.result;
+          if(rec&&rec.db&&(rec.updatedAt||0)>(DB.updatedAt||0))DB=normalizeDB(rec.db);
+          else idbPutSnapshot();
+          try{db.close()}catch(e){}
+          resolve();
+        };
+        gr.onerror=function(){try{db.close()}catch(e){}resolve()};
+      }catch(e){try{db.close()}catch(_){}resolve()}
+    };
+    req.onerror=function(){resolve()};
+  });
+  save();
+}
 var S={
   coin:'BTC',h:5,capital:1000,risk:.5,fee:4.5,lastForecast:0,lastRender:0,lastRest:0,
   hl:{price:NaN,book:null,oi:NaN,funding:NaN,candles:[],trades:[],oiHist:[],lastPrice:0,lastBook:0,lastTrades:0,lastCtx:0},
@@ -615,7 +702,7 @@ function renderHealth(){
     var v=S.feed[k],cls=v==='OK'?'ok':v==='STALE'?'warn':'bad';
     return'<div class="src"><div class="tiny">'+k+'</div><b class="'+cls+'">'+v+'</b></div>';
   }).join('');
-  $('health').innerHTML=map;$('healthText').textContent=S.coin+' · '+new Date().toLocaleTimeString('fr-FR')+' · tick '+(S.hl.lastPrice?Math.max(0,Math.round((now()-S.hl.lastPrice)/1000)):'—')+'s';
+  $('health').innerHTML=map;$('healthText').textContent=S.coin+' · '+new Date().toLocaleTimeString('fr-FR')+' · tick '+(S.hl.lastPrice?Math.max(0,Math.round((now()-S.hl.lastPrice)/1000)):'—')+'s · sauvegarde: localStorage + IndexedDB';
 }
 function journal(){
   $('journal').innerHTML=H.map(function(h){
@@ -657,6 +744,7 @@ function dashboard(){
   $('chartInfo').textContent='HL '+nfmt(S.hl.price)+' · BN '+nfmt(S.bn.price);renderCapital();renderHealth();journal();$('audit').textContent='CAPITAL PAPER = une simulation indépendante par horizon, une seule position active à la fois; sizing au risque '+S.risk+'% de l\'equity, entry/SL/TP enregistrés à t0, frais '+S.fee+' bps/side, funding exclu. PRETRAIN prix = '+((DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[S.h]&&DB.pretrain[S.coin].h[S.h].n)||0)+' labels pour '+hlabel(S.h)+'; non présenté comme OOS full. LIVE OOS = prévision gelée à t0 puis résolue au prix observé à t0+h. BASE exclut les features microstructurelles/PASR; FULL les apprend en live. PASR = feature expérimentale, verdict par différence Brier appariée + IC approximatif à 95 %. Warm-start ne réinitialise plus le live.';
 }
 async function boot(){
+  await hydratePersistent();
   S.coin=$('coin').value;S.h=+$('hor').value;S.capital=+$('capital').value||1000;S.risk=+$('risk').value||.5;S.fee=+$('fee').value||0;
   for(var pi=0;pi<H.length;pi++)paperState(H[pi]);
   reconnectHL();reconnectBN();restSpot();await restSync();await warmStart();dashboard();
