@@ -36,7 +36,7 @@ const H=[5,15,60,240],ST='cde_public_learning_v10',now=()=>Date.now(),cl=(x,a,b)
 let DB=(()=>{try{return JSON.parse(localStorage.getItem(ST)||'{}')}catch{return{}}})(); DB.models??={};DB.pending??={};DB.resolved??={};DB.hist??={};DB.tpgrid??={};
 const S={coin:'BTC',h:15,capital:1000,risk:.5,hl:{price:NaN,book:null,oi:NaN,funding:NaN,candles:[],trades:[]},bn:{price:NaN,oi:NaN,funding:NaN,spot:[],perp:[],liq:[]},feed:{HL_WS:'INIT',HL_L2:'INIT',HL_TRADES:'INIT',HL_CANDLE:'INIT',HL_CTX:'INIT',BN_WS:'INIT',BN_REST:'INIT'},ws:{hl:null,bn:null},lastTick:0,lastRest:0,lastForecast:0};
 function save(){localStorage.setItem(ST,JSON.stringify(DB))}
-function newM(){return{w:Array.from({length:3},()=>Array(10).fill(0)),b:[0,0,0],seen:0,brier:[],ll:[],hit:0,temp:1}}
+function newM(){return{w:Array.from({length:3},()=>Array(11).fill(0)),b:[0,0,0],seen:0,brier:[],ll:[],hit:0,temp:1}}
 function mdl(h,k){DB.models[h]??={base:newM(),full:newM()};return DB.models[h][k]}
 function sm(z){const m=Math.max(...z),e=z.map(v=>Math.exp(cl(v-m,-30,30))),s=e.reduce((a,b)=>a+b,0);return e.map(v=>v/s)}
 function ema(a,n){if(!a.length)return NaN;let e=a[0],k=2/(n+1);for(let i=1;i<a.length;i++)e=a[i]*k+e*(1-k);return e}
