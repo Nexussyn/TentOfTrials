@@ -440,10 +440,20 @@ function portfolioScan(){
   P.signalsRows=rows;P.lastScan=now();save();renderPortfolio();
 }
 function renderPortfolio(){
-  var p=portfolioState(),used=portfolioMarginUsed(p),free=Math.max(0,p.capital-used),risk=portfolioRiskOpen(p),ks=Object.keys(p.positions||{}),rows=(P.signalsRows||[]).slice().sort(function(a,b){return(b.volume||0)-(a.volume||0)});
-  $('portCapital').textContent=nfmt(p.capital,2)+' USDC';$('portUsed').textContent=nfmt(used,2)+' USDC';$('portFree').textContent=nfmt(free,2)+' USDC';$('portSlots').textContent=ks.length+' / '+P.maxSlots;$('portRisk').textContent=nfmt(risk,2)+' USDC';$('portfolioBadge').textContent=P.universe.length+' ACTIFS · '+ks.length+'/'+P.maxSlots+' SLOTS';
+  var p=portfolioState(),used=portfolioMarginUsed(p),free=Math.max(0,p.capital-used),risk=portfolioRiskOpen(p),ks=Object.keys(p.positions||{}),rows=(P.signalsRows&&P.signalsRows.length)?P.signalsRows.slice():[];
+  if(!rows.length)rows=P.universe.map(function(coin){return{coin:coin,volume:P.volume[coin]||0,action:'CHARGEMENT',p:NaN,edge:NaN,ev:NaN,pos:!!p.positions[coin]}});
+  rows.sort(function(a,b){return(b.volume||0)-(a.volume||0)});
+  $('portCapital').textContent=nfmt(p.capital,2)+' USDC';
+  $('portUsed').textContent=nfmt(used,2)+' USDC';
+  $('portFree').textContent=nfmt(free,2)+' USDC';
+  $('portSlots').textContent=ks.length+' / '+P.maxSlots;
+  $('portRisk').textContent=nfmt(risk,2)+' USDC';
+  $('portfolioBadge').textContent=P.universe.length+' ACTIFS · '+ks.length+'/'+P.maxSlots+' SLOTS';
   var html='<div class="portfolioRow header"><div>Actif</div><div>Signal</div><div>Prob.</div><div>Edge</div><div>EV</div><div>État</div></div>';
-  for(var i=0;i<rows.length;i++){var q=rows[i],cls=q.action==='LONG'?'up':q.action==='SHORT'?'down':'neu',st=q.pos?'POSITION':q.action==='CHARGEMENT'?'DONNÉES':'SURVEILLE';html+='<div class="portfolioRow"><b>'+q.coin+'</b><b class="'+cls+'">'+q.action+'</b><span>'+(finite(q.p)?(q.p*100).toFixed(1)+'%':'—')+'</span><span>'+(finite(q.edge)?((q.edge*100).toFixed(1))+' pt':'—')+'</span><span>'+(finite(q.ev)?(q.ev*10000).toFixed(2)+' bps':'—')+'</span><span>'+st+'</span></div>'}
+  for(var i=0;i<rows.length;i++){
+    var q=rows[i],cls=q.action==='LONG'?'up':q.action==='SHORT'?'down':'neu',st=q.pos?'POSITION':q.action==='CHARGEMENT'?'DONNÉES':'SURVEILLE';
+    html+='<div class="portfolioRow"><b>'+q.coin+'</b><b class="'+cls+'">'+q.action+'</b><span>'+(finite(q.p)?(q.p*100).toFixed(1)+'%':'—')+'</span><span>'+(finite(q.edge)?((q.edge*100).toFixed(1))+' pt':'—')+'</span><span>'+(finite(q.ev)?(q.ev*10000).toFixed(2)+' bps':'—')+'</span><span>'+st+'</span></div>';
+  }
   $('portfolioGrid').innerHTML=html;
 }
 function newM(){return{w:Array.from({length:3},function(){return Array(30).fill(0)}),b:[0,0,0],seen:0,liveSeen:0,temp:1,obs:[]}}
@@ -979,27 +989,22 @@ function restSpot(){
   }).catch(function(){S.feed.BN_SPOT='STALE'});
 }
 async function portfolioBootstrap(){
-  var t=now();
-  if(P.lastBootstrap&&t-P.lastBootstrap<15000)return;
-  P.lastBootstrap=t;
-  var list=P.universe.slice(),done=0;
+  var t=now();if(P.lastBootstrap&&t-P.lastBootstrap<15000)return{done:0,assets:P.universe.length};
+  P.lastBootstrap=t;var list=P.universe.slice(),done=0;
   for(var start=0;start<list.length;start+=5){
-    var batch=list.slice(start,start+5);
-    await Promise.all(batch.map(async function(coin){
-      var a=ensureAsset(coin);
-      if(a.hl.candles.length>=80)return;
+    await Promise.all(list.slice(start,start+5).map(async function(coin){
+      var a=ensureAsset(coin);if(a.hl.candles.length>=80)return;
       try{
         var end=now()-60000,res=await hl({type:'candleSnapshot',req:{coin:coin,interval:'1m',startTime:end-500*60000,endTime:end}});
         if(Array.isArray(res)&&res.length>=80){
           a.hl.candles=res.map(function(q){return{t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v}}).sort(function(x,y){return x.t-y.t}).slice(-1000);
           if(!finite(a.hl.price))a.hl.price=a.hl.candles[a.hl.candles.length-1].c;
-          a.feed.HL_CANDLE='OK';done++;
+          a.feed.HL_CANDLE='OK';P.bootstrapped[coin]=t;done++;
         }
       }catch(e){}
     }));
   }
-  if(done)save();
-  return done;
+  if(done)save();return{done:done,assets:list.length};
 }
 async function warmStart(){
   var key=S.coin,meta=DB.pretrain[key]||{}; meta.h=meta.h||{};
@@ -1095,7 +1100,7 @@ function dashboard(){
   $('hist').textContent=(DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[S.h]&&DB.pretrain[S.coin].h[S.h].n)||0;$('live').textContent=st.n;$('brier').textContent=nfmt(st.b,4);$('logloss').textContent=nfmt(st.ll,4);$('hit').textContent=pct(st.hit,1);$('roll').textContent=nfmt(st.roll,4);$('pend').textContent=(DB.pending[S.coin+'_'+S.h]||[]).length;
   $('learnState').textContent=st.n<30?'LEARNING':st.n<100?'CALIBRATING': 'ADAPTIVE';
   $('kPrice').textContent=nfmt(S.hl.price,2);$('kDQ').textContent=q+'/100';$('kMix').textContent=Math.round(m.alpha*100)+'% FULL · '+(model(S.h,'full').liveSeen||0)+' live';$('kEdge').textContent=finite(pl.edge)?((pl.edge>=0?'+':'')+(pl.edge*100).toFixed(1)+' pt'):'—';var ages=[S.hl.lastBook,S.hl.lastTrades,S.bn.lastPerp,S.bn.lastMark].filter(function(x){return x>0}).map(function(x){return Math.max(0,now()-x)/1000});$('kFresh').textContent=ages.length?Math.round(Math.max.apply(null,ages))+'s':'—';
-  $('chartInfo').textContent='HL '+nfmt(S.hl.price)+' · BN '+nfmt(S.bn.price);try{renderCapital()}catch(e){} try{renderHealth()}catch(e){} try{journal()}catch(e){} $('audit').textContent='CAPITAL PAPER = une simulation indépendante par horizon, une seule position active à la fois; sizing au risque '+S.risk+'% de l\'equity, entry/SL/TP enregistrés à t0, sizing incluant le coût du stop + frais aller-retour, frais '+S.fee+' bps/side, funding exclu. Le signal combine modèle appris + evidence prior temporaire, puis retire progressivement le prior avec les OOS live. PRETRAIN prix = '+((DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[S.h]&&DB.pretrain[S.coin].h[S.h].n)||0)+' labels pour '+hlabel(S.h)+'; non présenté comme OOS full. LIVE OOS = prévision gelée à t0 puis résolue au prix observé à t0+h. BASE exclut les features microstructurelles/PASR; FULL les apprend en live. PASR = feature expérimentale, verdict par différence Brier appariée + IC approximatif à 95 %. Warm-start ne réinitialise plus le live.';
+  $('chartInfo').textContent='HL '+nfmt(S.hl.price)+' · BN '+nfmt(S.bn.price);try{renderCapital()}catch(e){} try{renderPortfolio()}catch(e){} try{renderHealth()}catch(e){} try{journal()}catch(e){} $('audit').textContent='CAPITAL PAPER = une simulation indépendante par horizon, une seule position active à la fois; sizing au risque '+S.risk+'% de l\'equity, entry/SL/TP enregistrés à t0, sizing incluant le coût du stop + frais aller-retour, frais '+S.fee+' bps/side, funding exclu. Le signal combine modèle appris + evidence prior temporaire, puis retire progressivement le prior avec les OOS live. PRETRAIN prix = '+((DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[S.h]&&DB.pretrain[S.coin].h[S.h].n)||0)+' labels pour '+hlabel(S.h)+'; non présenté comme OOS full. LIVE OOS = prévision gelée à t0 puis résolue au prix observé à t0+h. BASE exclut les features microstructurelles/PASR; FULL les apprend en live. PASR = feature expérimentale, verdict par différence Brier appariée + IC approximatif à 95 %. Warm-start ne réinitialise plus le live.';
 }
 function syntheticState(){
   var t=now(),base=83250;
@@ -1140,9 +1145,10 @@ async function boot(){
     setInterval(function(){
       if(now()-S.lastRest>15000)restSync().then(function(){return portfolioBootstrap()}).then(function(){portfolioScan()}).catch(function(e){diagError('REST_LOOP',e)});
       restSpot();
-      updatePortfolioPositions();updatePaperPositions();resolve().catch(function(e){diagError('RESOLVE',e)});
+      updatePortfolioPositions();updatePaperPositions();if(S.hlSocket&&S.hlSocket.readyState===1){if(!fresh(S.hl.lastBook,5000))try{S.hlSocket.send(JSON.stringify({method:'subscribe',subscription:{type:'l2Book',coin:S.coin}}))}catch(e){}if(!fresh(S.hl.lastTrades,10000))try{S.hlSocket.send(JSON.stringify({method:'subscribe',subscription:{type:'trades',coin:S.coin}}))}catch(e){}}resolve().catch(function(e){diagError('RESOLVE',e)});
       try{dashboard()}catch(e){diagError('RENDER_LOOP',e)}
     },5000);
+    setInterval(function(){if(P.universe.length&&(!P.lastBootstrap||now()-P.lastBootstrap>=15000)){portfolioBootstrap().then(function(){portfolioScan()}).catch(function(){})}},5000);
     setInterval(function(){
       if(now()-S.lastForecast>55000){
         try{
