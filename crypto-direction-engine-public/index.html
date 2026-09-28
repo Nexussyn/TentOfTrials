@@ -191,7 +191,7 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
 
 <div class="tiny" style="padding:12px 2px">
   Hyperliquid public WS/Info API + Binance public market data. Aucun compte, aucune clé, aucun ordre réel.
-  Le warm-start public utilise l'historique de bougies pour pré-entraîner le sous-espace prix; les features L2 historiques complètes nécessitent les archives Hyperliquid et ne sont donc jamais simulées comme si elles existaient.
+  Le warm-start public utilise l'historique de bougies sur la fenêtre publique maximale pour pré-entraîner le sous-espace prix; les features L2 historiques complètes nécessitent les archives Hyperliquid et ne sont donc jamais simulées comme si elles existaient.
 </div>
 </main>
 
@@ -479,19 +479,21 @@ function reconnectBN(){
 }
 function restSpot(){
   fetch(BN_SPOT+'?symbol='+S.coin+'USDT&limit=1000').then(function(r){return r.ok?r.json():[]}).then(function(a){
-    for(var i=0;i<a.length;i++)S.bn.spot.push({time:a[i].T||now(),side:a[i].m?'S':'B',sz:+a[i].q});
-    S.bn.spot=S.bn.spot.slice(-5000);S.bn.lastSpot=now();S.feed.BN_SPOT='OK';
+    var map={};for(var j=0;j<S.bn.spot.length;j++)if(S.bn.spot[j].id!=null)map[S.bn.spot[j].id]=S.bn.spot[j];
+    for(var i=0;i<a.length;i++){var q=a[i],id=q.a!=null?q.a:(String(q.T)+'_'+String(q.p)+'_'+String(q.q));map[id]={id:id,time:q.T||now(),side:q.m?'S':'B',sz:+q.q}}
+    S.bn.spot=Object.keys(map).map(function(k){return map[k]}).sort(function(x,y){return x.time-y.time}).slice(-5000);
+    S.bn.lastSpot=now();S.feed.BN_SPOT='OK';
   }).catch(function(){S.feed.BN_SPOT='STALE'});
 }
 async function warmStart(){
   var key=S.coin,meta=DB.pretrain[key]||{}; meta.h=meta.h||{};
   if(H.every(function(h){return meta.h[h]&&meta.h[h].done})){ $('learningNote').textContent='PRETRAIN déjà présent pour '+S.coin+' : le Warm-start ne réinitialise plus le live.'; $('modeBadge').textContent='LIVE'; dashboard(); return; }
-  $('modeBadge').textContent='PRETRAIN';$('learningNote').textContent='Warm-start en cours : historique 1m prix. Le L2 historique complet n’est pas simulé.';
+  $('modeBadge').textContent='PRETRAIN';$('learningNote').textContent='Warm-start en cours : historique 1m prix sur la fenêtre maximale publique d’environ 3,4 jours. Le L2 historique complet n’est pas simulé.';
   meta.started=meta.started||now();DB.pretrain[key]=meta;save();
   for(var hi=0;hi<H.length;hi++){
     var h=H[hi]; meta.h[h]=meta.h[h]||{n:0,done:false}; if(meta.h[h].done)continue;
     try{
-      var end=now()-2*h*60000,start=end-5*86400000,res=await hl({type:'candleSnapshot',req:{coin:S.coin,interval:'1m',startTime:start,endTime:end}}),bars=(res||[]).map(function(q){return{t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v}}).sort(function(a,b){return a.t-b.t});
+      var end=now()-2*h*60000,start=end-4990*60000,res=await hl({type:'candleSnapshot',req:{coin:S.coin,interval:'1m',startTime:start,endTime:end}}),bars=(res||[]).map(function(q){return{t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v}}).sort(function(a,b){return a.t-b.t});
       if(bars.length<500)continue;
       var bm=model(h,'base'),fm=model(h,'full'),step=2;
       for(var i=80;i<bars.length-h;i+=step){
