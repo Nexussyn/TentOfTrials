@@ -25,7 +25,7 @@ async function state(coin){
   K('kl-'+coin,()=>J(BN+'/fapi/v1/klines?symbol='+coin+'USDT&interval=1m&limit=240'),7000)
  ]);
  const V=all.map(x=>x.status==='fulfilled'?x.value:null),mc=V[0],mids=V[1],bk=V[2],cc=V[3],bt=V[4],boi=V[5],bp=V[6],bkl=V[7];
- let ctx=null;if(Array.isArray(mc)&&Array.isArray(mc[0])&&Array.isArray(mc[1])){const i=mc[0][1]?.universe?.findIndex(x=>x.name===coin);if(i>=0)ctx=mc[1][i]}
+ let ctx=null;if(Array.isArray(mc)&&Array.isArray(mc[0])&&Array.isArray(mc[1])){const i=mc[0]?.universe?.findIndex(x=>x.name===coin);if(i>=0)ctx=mc[1][i]}
  const hc=(cc||[]).map(x=>({t:+x.t,o:+x.o,h:+x.h,l:+x.l,c:+x.c,v:+x.v})),bc=(bkl||[]).map(x=>({c:+x[4],q:+x[7],tb:+x[10]})),cl=hc.map(x=>x.c),d=book(bk);
  const hp=mids?.[coin]?+mids[coin]:ctx?.markPx?+ctx.markPx:NaN,bp0=bt?+bt.lastPrice:NaN;
  const funding=ctx?.funding!=null?+ctx.funding:(bp?+bp.lastFundingRate:NaN),oi=ctx?.openInterest!=null?+ctx.openInterest:(boi?+boi.openInterest:NaN);
