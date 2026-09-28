@@ -1,20 +1,26 @@
 # Crypto Direction Engine
 
-Public no-login trading intelligence cockpit. Hyperliquid is the primary venue and Binance Futures is the independent cross-venue reference.
+Public no-login crypto market direction cockpit.
 
-## Status
+## Live public build
 
-This release is a transparent evidence ensemble. It does not claim that the probabilities are calibrated or that the dashboard is profitable. It starts in COLD START and intentionally does not fabricate Brier/log-loss values.
+- Standalone browser build: https://rawcdn.githack.com/Nexussyn/TentOfTrials/592a4d0e9daedbab49fd91d8d28a91040b573158/crypto-direction-engine/public/live.html
+- Source tree: https://github.com/Nexussyn/TentOfTrials/tree/crypto-direction-engine/crypto-direction-engine
 
-## Live data
+The standalone page is static and calls the public Hyperliquid and Binance market-data endpoints directly from the browser. No exchange key or account is used.
 
-Hyperliquid public Info API: metaAndAssetCtxs, allMids, l2Book, candleSnapshot.
-Binance Futures public market data: 24h ticker, open interest, premium/funding, 1-minute klines.
+## Decision model
 
-## Design
+The engine converges real observations from:
+- Hyperliquid mids, perpetual contexts, L2 book and 1m candles.
+- Binance Futures ticker, open interest, funding/premium and 1m klines.
 
-The output combines structure, order-flow proxy, L2 depth imbalance, derivatives and cross-venue divergence. Each horizon (5m, 15m, 1h, 4h) has a separate scaling factor and an abstention rule that can return NO TRADE.
+It returns LONG / SHORT / NO TRADE for 5m, 15m, 1h and 4h horizons. It also exposes evidence blocks, disagreement, data-quality and explicit “what would change my mind” conditions.
 
-## Run
+## Validation
 
-npm start
+The probability readout is intentionally not marketed as a guaranteed predictor. Calibration begins in COLD START. Brier score and log-loss remain unreported until enough real walk-forward outcomes exist.
+
+## Server build
+
+The Node build in this folder uses npm start and provides a server-side API proxy for environments where direct browser API access is undesirable.
