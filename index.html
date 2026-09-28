@@ -908,6 +908,8 @@ async function restSync(){
   var jobs=[
     {name:'HL_CANDLE',p:hl({type:'candleSnapshot',req:{coin:S.coin,interval:'1m',startTime:t-3*86400000,endTime:t}})},
     {name:'HL_CTX',p:hl({type:'metaAndAssetCtxs'})},
+    {name:'HL_L2',p:hl({type:'l2Book',coin:S.coin})},
+    {name:'HL_TRADES',p:hl({type:'recentTrades',coin:S.coin})},
     {name:'BN_OI',p:fetchJSON(BNAPI+'/fapi/v1/openInterest?symbol='+S.coin+'USDT',{},6000)},
     {name:'BN_PREM',p:fetchJSON(BNAPI+'/fapi/v1/premiumIndex?symbol='+S.coin+'USDT',{},6000)}
   ];
@@ -918,9 +920,12 @@ async function restSync(){
   if(ctx&&ctx.ok){var u=ctx.v&&ctx.v[0]&&ctx.v[0].universe||[],idx=u.findIndex(function(q){return q.name===S.coin});if(idx>=0&&ctx.v[1]&&ctx.v[1][idx]){S.hl.oi=+ctx.v[1][idx].openInterest;S.hl.funding=+ctx.v[1][idx].funding;S.hl.lastCtx=t;S.feed.HL_CTX='OK'}else S.feed.HL_CTX='STALE'}else S.feed.HL_CTX='STALE';
   if(boi&&boi.ok&&boi.v&&boi.v.openInterest){S.bn.oi=+boi.v.openInterest;S.bn.oiHist.push({t:t,v:S.bn.oi});S.bn.oiHist=S.bn.oiHist.slice(-1000)}
   if(bp&&bp.ok&&bp.v&&bp.v.lastFundingRate!=null)S.bn.funding=+bp.v.lastFundingRate;
-    if(now()-S.hl.lastBook>7000){
-    try{var lb=await hl({type:'l2Book',coin:S.coin});if(lb&&Array.isArray(lb.levels)&&lb.levels.length>=2){S.hl.book=lb;S.hl.lastBook=t;S.feed.HL_L2='OK'}}catch(e){}
-  }
+  var hlL2=settled.find(function(x){return x.name==='HL_L2'}),hlTrades=settled.find(function(x){return x.name==='HL_TRADES'});
+  if(hlL2&&hlL2.ok&&hlL2.v&&Array.isArray(hlL2.v.levels)&&hlL2.v.levels.length>=2){S.hl.book=hlL2.v;S.hl.lastBook=t;S.feed.HL_L2='OK'}else if(!fresh(S.hl.lastBook,7000))S.feed.HL_L2='STALE';
+  if(hlTrades&&hlTrades.ok&&Array.isArray(hlTrades.v)&&hlTrades.v.length){
+    for(var ti=0;ti<hlTrades.v.length;ti++){var tq=hlTrades.v[ti];if(tq&&tq.side&&tq.sz!=null)S.hl.trades.push({time:+tq.time||t,side:(tq.side==='B'||tq.side==='Buy')?'B':'S',sz:+tq.sz})}
+    S.hl.trades=S.hl.trades.slice(-12000);S.hl.lastTrades=t;S.feed.HL_TRADES='OK';
+  }else if(!fresh(S.hl.lastTrades,12000))S.feed.HL_TRADES='STALE';
 S.feed.BN_REST=(boi&&boi.ok)||(bp&&bp.ok)?'OK':'STALE';S.lastRest=t;S.bn.lastRest=t;return settled;
 }
 function reconnectHL(){
@@ -1058,10 +1063,10 @@ function renderCapital(){
   }
 }
 function renderHealth(){
-  var map=Object.keys(S.feed).map(function(k){
-    var v=S.feed[k],cls=v==='OK'?'ok':v==='STALE'?'warn':'bad';
-    return'<div class="src"><div class="tiny">'+k+'</div><b class="'+cls+'">'+v+'</b></div>';
-  }).join('');
+  var f=Object.assign({},S.feed);
+  f.HL_L2=fresh(S.hl.lastBook,7000)?'OK':(S.hlSocket&&S.hlSocket.readyState===1?'WAIT':'STALE');
+  f.HL_TRADES=fresh(S.hl.lastTrades,12000)?'OK':(S.hlSocket&&S.hlSocket.readyState===1?'WAIT':'STALE');
+  var map=Object.keys(f).map(function(k){var v=f[k],cls=v==='OK'?'ok':v==='STALE'?'warn':'bad';return'<div class="src"><div class="tiny">'+k+'</div><b class="'+cls+'">'+v+'</b></div>'}).join('');
   $('health').innerHTML=map;$('healthText').textContent=S.coin+' · '+new Date().toLocaleTimeString('fr-FR')+' · tick '+(S.hl.lastPrice?Math.max(0,Math.round((now()-S.hl.lastPrice)/1000)):'—')+'s · sauvegarde: localStorage + IndexedDB';
 }
 function journal(){
@@ -1145,6 +1150,19 @@ async function boot(){
     setInterval(function(){
       if(now()-S.lastRest>15000)restSync().then(function(){return portfolioBootstrap()}).then(function(){portfolioScan()}).catch(function(e){diagError('REST_LOOP',e)});
       restSpot();
+      if(!fresh(S.hl.lastBook,7000)||!fresh(S.hl.lastTrades,12000)){
+        Promise.all([
+          !fresh(S.hl.lastBook,7000)?hl({type:'l2Book',coin:S.coin}):Promise.resolve(null),
+          !fresh(S.hl.lastTrades,12000)?hl({type:'recentTrades',coin:S.coin}):Promise.resolve(null)
+        ]).then(function(z){
+          var lb=z[0],tr=z[1],tt=now();
+          if(lb&&Array.isArray(lb.levels)&&lb.levels.length>=2){S.hl.book=lb;S.hl.lastBook=tt;S.feed.HL_L2='OK'}
+          if(Array.isArray(tr)&&tr.length){
+            for(var ri=0;ri<tr.length;ri++){var tq=tr[ri];if(tq&&tq.side&&tq.sz!=null)S.hl.trades.push({time:+tq.time||tt,side:(tq.side==='B'||tq.side==='Buy')?'B':'S',sz:+tq.sz})}
+            S.hl.trades=S.hl.trades.slice(-12000);S.hl.lastTrades=tt;S.feed.HL_TRADES='OK'
+          }
+        }).catch(function(){});
+      }
       updatePortfolioPositions();updatePaperPositions();if(S.hlSocket&&S.hlSocket.readyState===1){if(!fresh(S.hl.lastBook,5000))try{S.hlSocket.send(JSON.stringify({method:'subscribe',subscription:{type:'l2Book',coin:S.coin}}))}catch(e){}if(!fresh(S.hl.lastTrades,10000))try{S.hlSocket.send(JSON.stringify({method:'subscribe',subscription:{type:'trades',coin:S.coin}}))}catch(e){}}resolve().catch(function(e){diagError('RESOLVE',e)});
       try{dashboard()}catch(e){diagError('RENDER_LOOP',e)}
     },5000);
