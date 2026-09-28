@@ -1,0 +1,59 @@
+name: CDE smoke test
+on:
+  push:
+    paths:
+      - 'index.html'
+      - '.github/workflows/cde-smoke.yml'
+  workflow_dispatch:
+jobs:
+  browser-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install browser test
+        run: |
+          npm init -y
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+      - name: Start static server
+        run: |
+          python3 -m http.server 4173 --bind 127.0.0.1 > /tmp/cde-http.log 2>&1 &
+          echo $! > /tmp/cde-http.pid
+      - name: Run browser smoke test
+        run: |
+          node <<'NODE'
+          const { chromium } = require('playwright');
+          (async () => {
+            const browser = await chromium.launch({headless:true});
+            const page = await browser.newPage();
+            const errors = [];
+            page.on('pageerror', e => errors.push('PAGEERROR: ' + e.stack));
+            page.on('console', m => { if (m.type() === 'error') errors.push('CONSOLE: ' + m.text()); });
+            await page.goto('http://127.0.0.1:4173/index.html?smoke=1', {waitUntil:'domcontentloaded'});
+            await page.waitForTimeout(12000);
+            const state = await page.evaluate(() => ({
+              title: document.title,
+              dir: document.getElementById('dir')?.textContent,
+              price: document.getElementById('kPrice')?.textContent,
+              health: document.getElementById('health')?.textContent,
+              journal: document.getElementById('journal')?.textContent,
+              capital: document.getElementById('capitalCards')?.textContent,
+              mode: document.getElementById('modeBadge')?.textContent,
+              indexedDB: !!window.indexedDB,
+              localStorage: !!window.localStorage
+            }));
+            console.log(JSON.stringify(state, null, 2));
+            if (state.title !== 'Crypto Direction Engine — V12.8') throw new Error('wrong title: ' + state.title);
+            if (!state.dir || state.dir === 'CHARGEMENT') throw new Error('dashboard never left CHARGEMENT');
+            if (!state.price || state.price === '—') throw new Error('Hyperliquid price not populated');
+            if (!state.health || state.health.trim().length < 10) throw new Error('health panel empty');
+            if (!state.journal || !state.journal.includes('5m')) throw new Error('journal not rendered');
+            if (!state.capital || !state.capital.includes('1000')) throw new Error('capital panel not rendered');
+            if (errors.length) throw new Error(errors.join('\n'));
+            await browser.close();
+          })().catch(e => { console.error(e); process.exit(1); });
+          NODE
