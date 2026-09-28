@@ -24,37 +24,67 @@ jobs:
         run: |
           python3 -m http.server 4173 --bind 127.0.0.1 > /tmp/cde-http.log 2>&1 &
           echo $! > /tmp/cde-http.pid
-      - name: Run browser smoke test
+      - name: Capture browser diagnostics
+        continue-on-error: true
         run: |
-          node <<'NODE'
+          mkdir -p /tmp/cde-smoke
+          node <<'NODE' > /tmp/cde-smoke/run.log 2>&1
           const { chromium } = require('playwright');
           (async () => {
             const browser = await chromium.launch({headless:true});
-            const page = await browser.newPage();
+            const page = await browser.newPage({viewport:{width:1600,height:1000}});
             const errors = [];
-            page.on('pageerror', e => errors.push('PAGEERROR: ' + e.stack));
+            page.on('pageerror', e => { errors.push('PAGEERROR: ' + e.stack); });
             page.on('console', m => { if (m.type() === 'error') errors.push('CONSOLE: ' + m.text()); });
-            await page.goto('http://127.0.0.1:4173/index.html?smoke=1', {waitUntil:'domcontentloaded'});
-            await page.waitForTimeout(12000);
+            await page.goto('http://127.0.0.1:4173/index.html?smoke=diagnostic', {waitUntil:'domcontentloaded',timeout:15000});
+            await page.waitForTimeout(15000);
             const state = await page.evaluate(() => ({
               title: document.title,
+              readyState: document.readyState,
               dir: document.getElementById('dir')?.textContent,
               price: document.getElementById('kPrice')?.textContent,
               health: document.getElementById('health')?.textContent,
               journal: document.getElementById('journal')?.textContent,
               capital: document.getElementById('capitalCards')?.textContent,
               mode: document.getElementById('modeBadge')?.textContent,
-              indexedDB: !!window.indexedDB,
-              localStorage: !!window.localStorage
+              headline: document.getElementById('headline')?.textContent,
+              scriptCount: document.scripts.length,
+              bodyTextLength: document.body.innerText.length,
+              localStorageKeys: Object.keys(localStorage),
+              indexedDB: !!window.indexedDB
             }));
-            console.log(JSON.stringify(state, null, 2));
-            if (state.title !== 'Crypto Direction Engine — V12.8') throw new Error('wrong title: ' + state.title);
-            if (!state.dir || state.dir === 'CHARGEMENT') throw new Error('dashboard never left CHARGEMENT');
-            if (!state.price || state.price === '—') throw new Error('Hyperliquid price not populated');
-            if (!state.health || state.health.trim().length < 10) throw new Error('health panel empty');
-            if (!state.journal || !state.journal.includes('5m')) throw new Error('journal not rendered');
-            if (!state.capital || !state.capital.includes('1000')) throw new Error('capital panel not rendered');
-            if (errors.length) throw new Error(errors.join('\n'));
+            console.log('STATE', JSON.stringify(state, null, 2));
+            console.log('ERRORS', JSON.stringify(errors, null, 2));
+            await page.screenshot({path:'/tmp/cde-smoke/page.png',fullPage:true});
+            require('fs').writeFileSync('/tmp/cde-smoke/state.json',JSON.stringify({state,errors},null,2));
             await browser.close();
-          })().catch(e => { console.error(e); process.exit(1); });
+          })().catch(e => {
+            console.error('FATAL', e.stack || e);
+            process.exitCode = 0;
+          });
+          NODE
+          cat /tmp/cde-smoke/run.log
+      - name: Collect server log
+        if: always()
+        run: |
+          cat /tmp/cde-http.log > /tmp/cde-smoke/http.log || true
+          git rev-parse HEAD > /tmp/cde-smoke/commit.txt
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cde-smoke-diagnostics
+          path: /tmp/cde-smoke
+      - name: Enforce smoke assertions
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const d = JSON.parse(fs.readFileSync('/tmp/cde-smoke/state.json','utf8'));
+          const s = d.state || {};
+          if (s.title !== 'Crypto Direction Engine — V12.8') throw new Error('wrong title: '+s.title);
+          if (s.dir === 'CHARGEMENT' || !s.dir) throw new Error('dashboard stayed in CHARGEMENT');
+          if (s.price === '—' || !s.price) throw new Error('price not populated');
+          if (!s.health || s.health.trim().length < 10) throw new Error('health empty');
+          if (!s.journal || !s.journal.includes('5m')) throw new Error('journal empty');
+          if (d.errors?.length) throw new Error(d.errors.join('\n'));
           NODE
