@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Crypto Direction Engine — V13.6</title>
+<title>Crypto Direction Engine — V13.7</title>
 <style>
 :root{--bg:#061016;--p:#0c1a22;--p2:#09161d;--l:#243843;--t:#edf4f7;--m:#8ea3ad;--u:#43d19d;--d:#ff7082;--n:#f0bf55;--c:#67d7ef}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 15% 0,#122a32,#061016 42%,#050b0f);color:var(--t);font:14px/1.4 system-ui,-apple-system,Segoe UI,sans-serif}
@@ -32,7 +32,7 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
 <body>
 <header class="top">
   <div>
-    <div class="brand">CRYPTO DIRECTION ENGINE · V13.6</div>
+    <div class="brand">CRYPTO DIRECTION ENGINE · V13.7</div>
     <div class="tag">Hyperliquid primaire · Binance cross-venue · self-evaluating · persistance double · OOS résoluble après fermeture · aucune exécution réelle</div>
   </div>
   <div class="ctrl">
@@ -206,7 +206,7 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
 
 <div class="tiny" style="padding:12px 2px">
   Hyperliquid public WS/Info API + Binance public market data. Aucun compte, aucune clé, aucun ordre réel.
-  Le warm-start public utilise l'historique de bougies sur la fenêtre publique maximale pour pré-entraîner le sous-espace prix; les features L2 historiques complètes nécessitent les archives Hyperliquid et ne sont donc jamais simulées comme si elles existaient. Historique, modèles, OOS, capital papier et pending sont persistés en localStorage + IndexedDB et les pending arrivés à échéance peuvent être résolus par l'API historique après réouverture.
+  Le warm-start public utilise l'historique de bougies sur la fenêtre publique maximale pour pré-entraîner le sous-espace prix; les features L2 historiques complètes nécessitent les archives Hyperliquid et ne sont donc jamais simulées comme si elles existaient. Historique, modèles, OOS, capital papier et pending sont persistés immédiatement en localStorage puis sauvegardés/récupérés en arrière-plan via IndexedDB et les pending arrivés à échéance peuvent être résolus par l'API historique après réouverture.
 </div>
 </main>
 
@@ -304,29 +304,40 @@ function save(){
   try{localStorage.setItem(STORE,JSON.stringify(DB))}catch(e){}
   clearTimeout(idbTimer);idbTimer=setTimeout(idbPutSnapshot,250);
 }
-async function hydratePersistent(){
+function hydratePersistent(){
+  // Boot MUST NOT wait for IndexedDB. localStorage is loaded synchronously above;
+  // IndexedDB only repairs/restores a newer snapshot asynchronously.
   if(!window.indexedDB){save();return}
-  await new Promise(function(resolve){
-    var req;
-    try{req=indexedDB.open(IDB_NAME,IDB_VERSION)}catch(e){resolve();return}
-    req.onupgradeneeded=function(){var db=req.result;if(!db.objectStoreNames.contains(IDB_STORE))db.createObjectStore(IDB_STORE,{keyPath:'id'})};
+  try{
+    var req=indexedDB.open(IDB_NAME,IDB_VERSION);
+    req.onupgradeneeded=function(){
+      try{
+        var db=req.result;
+        if(!db.objectStoreNames.contains(IDB_STORE))db.createObjectStore(IDB_STORE,{keyPath:'id'});
+      }catch(e){}
+    };
     req.onsuccess=function(){
       var db=req.result;
       try{
-        var tx=db.transaction(IDB_STORE,'readonly'),gr=tx.objectStore(IDB_STORE).get('state');
+        var tx=db.transaction(IDB_STORE,'readonly');
+        var gr=tx.objectStore(IDB_STORE).get('state');
         gr.onsuccess=function(){
-          var rec=gr.result;
-          if(rec&&rec.db&&(rec.updatedAt||0)>(DB.updatedAt||0))DB=normalizeDB(rec.db);
-          else idbPutSnapshot();
+          try{
+            var rec=gr.result;
+            if(rec&&rec.db&&(rec.updatedAt||0)>(DB.updatedAt||0)){
+              DB=normalizeDB(rec.db);
+              save();
+              try{dashboard()}catch(e){diagError('PERSISTENCE_RENDER',e)}
+            }
+          }catch(e){diagError('PERSISTENCE_READ',e)}
           try{db.close()}catch(e){}
-          resolve();
         };
-        gr.onerror=function(){try{db.close()}catch(e){}resolve()};
-      }catch(e){try{db.close()}catch(_){}resolve()}
+        gr.onerror=function(){try{db.close()}catch(e){}};
+      }catch(e){try{db.close()}catch(_){}}
     };
-    req.onerror=function(){resolve()};
-  });
-  save();
+    req.onerror=function(){};
+    req.onblocked=function(){};
+  }catch(e){}
 }
 var S={
   coin:'BTC',h:5,capital:1000,risk:.5,fee:4.5,lastForecast:0,lastRender:0,lastRest:0,
@@ -801,7 +812,7 @@ function restSpot(){
 }
 async function warmStart(){
   var key=S.coin,meta=DB.pretrain[key]||{}; meta.h=meta.h||{};
-  if(H.every(function(h){return meta.h[h]&&meta.h[h].done})){ $('learningNote').textContent='PRETRAIN déjà présent pour '+S.coin+' : le Warm-start ne réinitialise plus le live. Build V13.6.'; $('modeBadge').textContent='LIVE'; dashboard(); return; }
+  if(H.every(function(h){return meta.h[h]&&meta.h[h].done})){ $('learningNote').textContent='PRETRAIN déjà présent pour '+S.coin+' : le Warm-start ne réinitialise plus le live. Build V13.7.'; $('modeBadge').textContent='LIVE'; dashboard(); return; }
   $('modeBadge').textContent='PRETRAIN';$('learningNote').textContent='Warm-start en cours : historique 1m prix sur la fenêtre maximale publique d’environ 3,4 jours. Le L2 historique complet n’est pas simulé.';
   meta.started=meta.started||now();DB.pretrain[key]=meta;save();
   for(var hi=0;hi<H.length;hi++){
@@ -949,7 +960,7 @@ async function boot(){
     if(SELFTEST){
       stage('SELFTEST');syntheticState();dashboard();assertSelfTest();stage('SELFTEST PASS');return;
     }
-    try{await withTimeout(hydratePersistent(),1200,'persistence hydration')}catch(e){diagError('persistence',e)}
+    try{hydratePersistent()}catch(e){diagError('PERSISTENCE_INIT',e)}
     dashboard();
     stage('CONNECTING');
     reconnectHL();reconnectBN();restSpot();
