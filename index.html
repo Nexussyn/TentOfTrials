@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Crypto Direction Engine — V13.4</title>
+<title>Crypto Direction Engine — V13.5</title>
 <style>
 :root{--bg:#061016;--p:#0c1a22;--p2:#09161d;--l:#243843;--t:#edf4f7;--m:#8ea3ad;--u:#43d19d;--d:#ff7082;--n:#f0bf55;--c:#67d7ef}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 15% 0,#122a32,#061016 42%,#050b0f);color:var(--t);font:14px/1.4 system-ui,-apple-system,Segoe UI,sans-serif}
@@ -32,7 +32,7 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
 <body>
 <header class="top">
   <div>
-    <div class="brand">CRYPTO DIRECTION ENGINE · V13.4</div>
+    <div class="brand">CRYPTO DIRECTION ENGINE · V13.5</div>
     <div class="tag">Hyperliquid primaire · Binance cross-venue · self-evaluating · persistance double · OOS résoluble après fermeture · aucune exécution réelle</div>
   </div>
   <div class="ctrl">
@@ -762,7 +762,7 @@ function restSpot(){
 }
 async function warmStart(){
   var key=S.coin,meta=DB.pretrain[key]||{}; meta.h=meta.h||{};
-  if(H.every(function(h){return meta.h[h]&&meta.h[h].done})){ $('learningNote').textContent='PRETRAIN déjà présent pour '+S.coin+' : le Warm-start ne réinitialise plus le live. Build V13.4.'; $('modeBadge').textContent='LIVE'; dashboard(); return; }
+  if(H.every(function(h){return meta.h[h]&&meta.h[h].done})){ $('learningNote').textContent='PRETRAIN déjà présent pour '+S.coin+' : le Warm-start ne réinitialise plus le live. Build V13.5.'; $('modeBadge').textContent='LIVE'; dashboard(); return; }
   $('modeBadge').textContent='PRETRAIN';$('learningNote').textContent='Warm-start en cours : historique 1m prix sur la fenêtre maximale publique d’environ 3,4 jours. Le L2 historique complet n’est pas simulé.';
   meta.started=meta.started||now();DB.pretrain[key]=meta;save();
   for(var hi=0;hi<H.length;hi++){
@@ -826,11 +826,32 @@ function journal(){
 }
 function draw(){
   var a=S.hl.candles.slice(-180),c=$('chart'),x=c.getContext('2d'),r=c.getBoundingClientRect(),d=devicePixelRatio||1;
-  c.width=r.width*d;c.height=r.height*d;x.scale(d,d);x.clearRect(0,0,r.width,r.height);if(a.length<2)return;
+  c.width=Math.max(300,Math.floor(r.width*d));c.height=Math.max(220,Math.floor(r.height*d));x.setTransform(d,0,0,d,0,0);x.clearRect(0,0,r.width,r.height);
+  if(a.length<2){x.fillStyle='#8ea3ad';x.font='12px system-ui';x.fillText('En attente des bougies Hyperliquid…',16,28);return}
   var lo=Math.min.apply(null,a.map(function(q){return q.l})),hi=Math.max.apply(null,a.map(function(q){return q.h})),rg=hi-lo||1;
-  var X=function(i){return 36+i/(a.length-1)*(r.width-48)},Y=function(v){return 12+(hi-v)/rg*(r.height-44)};
-  x.strokeStyle='#17303b';for(var i=0;i<5;i++){var yy=12+i/4*(r.height-44);x.beginPath();x.moveTo(36,yy);x.lineTo(r.width-12,yy);x.stroke()}
-  for(var j=0;j<a.length;j++){var q=a[j],cx=X(j),up=q.c>=q.o;x.strokeStyle=up?'#43d19d':'#ff7082';x.beginPath();x.moveTo(cx,Y(q.h));x.lineTo(cx,Y(q.l));x.stroke();x.fillStyle=x.strokeStyle;x.fillRect(cx-1.6,Y(Math.max(q.o,q.c)),3.2,Math.max(1,Y(Math.min(q.o,q.c))-Y(Math.max(q.o,q.c))))}
+  var left=64,right=16,top=14,bottom=22,X=function(i){return left+i/(a.length-1)*(r.width-left-right)},Y=function(v){return top+(hi-v)/rg*(r.height-top-bottom);
+  };
+  x.font='11px system-ui';x.lineWidth=1;
+  x.strokeStyle='#17303b';x.fillStyle='#8ea3ad';
+  for(var i=0;i<5;i++){
+    var yy=top+i/4*(r.height-top-bottom),pv=hi-i/4*rg;
+    x.beginPath();x.moveTo(left,yy);x.lineTo(r.width-right,yy);x.stroke();
+    x.fillText(nfmt(pv,2),6,yy+4);
+  }
+  for(var j=0;j<a.length;j++){
+    var q=a[j],cx=X(j),up=q.c>=q.o;
+    x.strokeStyle=up?'#43d19d':'#ff7082';x.beginPath();x.moveTo(cx,Y(q.h));x.lineTo(cx,Y(q.l));x.stroke();
+    x.fillStyle=x.strokeStyle;
+    var y1=Y(Math.max(q.o,q.c)),h=Math.max(1,Y(Math.min(q.o,q.c))-y1);
+    x.fillRect(Math.max(left,cx-2),y1,4,h);
+  }
+  if(finite(S.hl.price)){
+    var cy=Y(S.hl.price);
+    if(cy>=top&&cy<=r.height-bottom){
+      x.strokeStyle='#f0bf55';x.setLineDash([5,4]);x.beginPath();x.moveTo(left,cy);x.lineTo(r.width-right,cy);x.stroke();x.setLineDash([]);
+      x.fillStyle='#f0bf55';x.fillText('HL '+nfmt(S.hl.price,2),r.width-right-92,cy-5);
+    }
+  }
 }
 function dashboard(){
   var f=feats(),m=mixed(S.h,f),pl=orderPlan(S.h,f,m),q=pl.q,dir=pl.direction,st=statsFor(S.h),pv=pasrVerdict(S.h);
@@ -854,7 +875,7 @@ function dashboard(){
   $('hist').textContent=(DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[S.h]&&DB.pretrain[S.coin].h[S.h].n)||0;$('live').textContent=st.n;$('brier').textContent=nfmt(st.b,4);$('logloss').textContent=nfmt(st.ll,4);$('hit').textContent=pct(st.hit,1);$('roll').textContent=nfmt(st.roll,4);$('pend').textContent=(DB.pending[S.coin+'_'+S.h]||[]).length;
   $('learnState').textContent=st.n<30?'LEARNING':st.n<100?'CALIBRATING': 'ADAPTIVE';
   $('kPrice').textContent=nfmt(S.hl.price,2);$('kDQ').textContent=q+'/100';$('kMix').textContent=Math.round(m.alpha*100)+'% FULL · '+(model(S.h,'full').liveSeen||0)+' live';$('kEdge').textContent=finite(pl.edge)?((pl.edge>=0?'+':'')+(pl.edge*100).toFixed(1)+' pt'):'—';var ages=[S.hl.lastBook,S.hl.lastTrades,S.bn.lastPerp,S.bn.lastMark].filter(function(x){return x>0}).map(function(x){return Math.max(0,now()-x)/1000});$('kFresh').textContent=ages.length?Math.round(Math.max.apply(null,ages))+'s':'—';
-  $('chartInfo').textContent='HL '+nfmt(S.hl.price)+' · BN '+nfmt(S.bn.price);try{renderCapital()}catch(e){} try{renderHealth()}catch(e){} try{journal()}catch(e){} $('audit').textContent='CAPITAL PAPER = une simulation indépendante par horizon, une seule position active à la fois; sizing au risque '+S.risk+'% de l\'equity, entry/SL/TP enregistrés à t0, sizing incluant le coût du stop + frais aller-retour, frais '+S.fee+' bps/side, funding exclu. Le signal combine modèle appris + evidence prior temporaire, puis retire progressivement le prior avec les OOS live. PRETRAIN prix = '+((DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[S.h]&&DB.pretrain[S.coin].h[S.h].n)||0)+' labels pour '+hlabel(S.h)+'; non présenté comme OOS full. LIVE OOS = prévision gelée à t0 puis résolue au prix observé à t0+h. BASE exclut les features microstructurelles/PASR; FULL les apprend en live. PASR = feature expérimentale, verdict par différence Brier appariée + IC approximatif à 95 %. Warm-start ne réinitialise plus le live.';
+  $('chartInfo').textContent='HL '+nfmt(S.hl.price)+' · BN '+nfmt(S.bn.price);try{draw()}catch(e){diagError('CHART',e)} try{renderCapital()}catch(e){} try{renderHealth()}catch(e){} try{journal()}catch(e){} $('audit').textContent='CAPITAL PAPER = une simulation indépendante par horizon, une seule position active à la fois; sizing au risque '+S.risk+'% de l\'equity, entry/SL/TP enregistrés à t0, sizing incluant le coût du stop + frais aller-retour, frais '+S.fee+' bps/side, funding exclu. Le signal combine modèle appris + evidence prior temporaire, puis retire progressivement le prior avec les OOS live. PRETRAIN prix = '+((DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[S.h]&&DB.pretrain[S.coin].h[S.h].n)||0)+' labels pour '+hlabel(S.h)+'; non présenté comme OOS full. LIVE OOS = prévision gelée à t0 puis résolue au prix observé à t0+h. BASE exclut les features microstructurelles/PASR; FULL les apprend en live. PASR = feature expérimentale, verdict par différence Brier appariée + IC approximatif à 95 %. Warm-start ne réinitialise plus le live.';
 }
 function syntheticState(){
   var t=now(),base=83250;
@@ -921,6 +942,7 @@ $('capital').oninput=function(){S.capital=+$('capital').value||1000};
 $('risk').oninput=function(){S.risk=+$('risk').value||.5};
 $('fee').oninput=function(){S.fee=+$('fee').value||0};
 $('relearn').onclick=function(){var key=S.coin;DB.pretrain[key]=undefined;H.forEach(function(h){DB.models[S.coin+'_'+h]=undefined});save();warmStart().then(function(){dashboard()}).catch(function(e){diagError('RELEARN',e)})};
+window.addEventListener('resize',function(){try{draw()}catch(e){diagError('CHART_RESIZE',e)}});
 boot();
 </script>
 </body>
