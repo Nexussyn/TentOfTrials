@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Crypto Direction Engine — V12.5</title>
+<title>Crypto Direction Engine — V12.7</title>
 <style>
 :root{--bg:#061016;--p:#0c1a22;--p2:#09161d;--l:#243843;--t:#edf4f7;--m:#8ea3ad;--u:#43d19d;--d:#ff7082;--n:#f0bf55;--c:#67d7ef}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 15% 0,#122a32,#061016 42%,#050b0f);color:var(--t);font:14px/1.4 system-ui,-apple-system,Segoe UI,sans-serif}
@@ -32,8 +32,8 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
 <body>
 <header class="top">
   <div>
-    <div class="brand">CRYPTO DIRECTION ENGINE · V12.5</div>
-    <div class="tag">Hyperliquid primaire · Binance cross-venue · self-evaluating · persistance double · aucune exécution réelle</div>
+    <div class="brand">CRYPTO DIRECTION ENGINE · V12.7</div>
+    <div class="tag">Hyperliquid primaire · Binance cross-venue · self-evaluating · persistance double · OOS résoluble après fermeture · aucune exécution réelle</div>
   </div>
   <div class="ctrl">
     <select id="coin" title="Marché analysé"><option>BTC</option><option>ETH</option><option>SOL</option></select>
@@ -205,7 +205,7 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
 
 <div class="tiny" style="padding:12px 2px">
   Hyperliquid public WS/Info API + Binance public market data. Aucun compte, aucune clé, aucun ordre réel.
-  Le warm-start public utilise l'historique de bougies sur la fenêtre publique maximale pour pré-entraîner le sous-espace prix; les features L2 historiques complètes nécessitent les archives Hyperliquid et ne sont donc jamais simulées comme si elles existaient. Historique, modèles, OOS, capital papier et pending sont persistés en localStorage + IndexedDB.
+  Le warm-start public utilise l'historique de bougies sur la fenêtre publique maximale pour pré-entraîner le sous-espace prix; les features L2 historiques complètes nécessitent les archives Hyperliquid et ne sont donc jamais simulées comme si elles existaient. Historique, modèles, OOS, capital papier et pending sont persistés en localStorage + IndexedDB et les pending arrivés à échéance peuvent être résolus par l'API historique après réouverture.
 </div>
 </main>
 
@@ -436,18 +436,36 @@ function dataQuality(f){
 }
 function grid(h,dir){
   var key=S.coin+'_'+h+'_'+dir;
-  if(!DB.grid[key])DB.grid[key]=[0.55,0.7,0.9,1.1,1.35].flatMap(function(sl){return[0.75,1,1.25,1.5,1.75,2,2.5,3].map(function(tp){return{sl:sl,tp:tp,n:0,ev:0}})});
+  if(!DB.grid[key])DB.grid[key]=[0.75,1,1.25,1.5,2,2.5,3].flatMap(function(sl){return[1,1.5,2,2.5,3,4,5,6].map(function(tp){return{sl:sl,tp:tp,n:0,ev:NaN}})});
+  // Migrate older 0-3 ATR grids without deleting their observations.
+  if(DB.grid[key].length<30){
+    var old=DB.grid[key].slice();DB.grid[key]=[0.75,1,1.25,1.5,2,2.5,3].flatMap(function(sl){return[1,1.5,2,2.5,3,4,5,6].map(function(tp){
+      var q=old.find(function(x){return x.sl===sl&&x.tp===tp});return q||{sl:sl,tp:tp,n:0,ev:NaN};
+    })});
+  }
   return DB.grid[key];
 }
-function bestPair(h,dir){
-  var g=grid(h,dir),usable=g.filter(function(x){return x.n>=15});
-  return (usable.length?usable:g).slice().sort(function(a,b){return b.ev-a.ev})[0];
+function pairCurrentEV(g,pd,po,entry,atr,fee){
+  if(!finite(entry)||!finite(atr)||entry<=0)return NaN;
+  var feeRet=2*fee/10000, tpRet=atr*g.tp/entry, slRet=atr*g.sl/entry;
+  return pd*tpRet-po*slRet-feeRet;
+}
+function bestPair(h,dir,pd,po,entry,atr){
+  var g=grid(h,dir),fee=S.fee,rank=g.map(function(x){
+    var cur=pairCurrentEV(x,pd,po,entry,atr,fee),riskDen=atr*x.sl;
+    var feeR=entry>0&&riskDen>0?entry*(2*fee/10000)/riskDen:NaN;
+    var learned=finite(x.ev)?x.ev:NaN;
+    var score=finite(cur)&&finite(learned)&&x.n>=15?(0.65*(cur/(atr/entry||1))-0.0+0.35*learned):finite(cur)?(cur/(atr/entry||1)): (finite(learned)?learned:-Infinity);
+    return{x:x,cur:cur,score:score};
+  }).filter(function(z){return finite(z.score)});
+  rank.sort(function(a,b){return b.score-a.score});
+  return rank.length?rank[0].x:{sl:1.25,tp:3,n:0,ev:NaN};
 }
 function orderPlan(h,f,m){
   var pL=m.p[2],pN=m.p[1],pS=m.p[0],dir=pL>=pS?'LONG':'SHORT',pd=dir==='LONG'?pL:pS,po=dir==='LONG'?pS:pL;
-  var d=f.depth||{},entry=dir==='LONG'?d.ask:d.bid,a=finite(f.atr)?f.atr:(finite(S.hl.price)?S.hl.price*.0025:NaN),q=dataQuality(f),pair=bestPair(h,dir),riskCash=S.capital*S.risk/100;
+  var d=f.depth||{},entry=dir==='LONG'?d.ask:d.bid,a=finite(f.atr)?f.atr:(finite(S.hl.price)?S.hl.price*.0025:NaN),q=dataQuality(f),pair=bestPair(h,dir,pd,po,entry,a),riskCash=S.capital*S.risk/100;
   var riskDist=a*pair.sl,sz=riskDist>0?riskCash/riskDist:NaN,sl=dir==='LONG'?entry-riskDist:entry+riskDist,tp=dir==='LONG'?entry+a*pair.tp:entry-a*pair.tp,rr=pair.tp/pair.sl;
-  var costR=entry&&a?entry*((S.fee*2)/10000)/a:0,ev=(pd*pair.tp)-(po*pair.sl)-costR,edge=pd-po;
+  var feeR=entry&&a&&pair.sl?entry*((S.fee*2)/10000)/(a*pair.sl):0,evR=(pd*pair.tp)-(po*pair.sl)-feeR,evRet=entry&&a?(pd*(a*pair.tp/entry)-po*(a*pair.sl/entry)-(S.fee*2/10000)):NaN,edge=pd-po;
   var es=m.score,align=finite(es)?(dir==='LONG'?es: -es):NaN, strongEvidence=finite(align)&&align>=.12;
   var gateReasons=[];
   if(!finite(entry)||!finite(a)||!finite(f.l2))gateReasons.push('L2/ATR');
@@ -455,11 +473,11 @@ function orderPlan(h,f,m){
   if(pd<.47)gateReasons.push('prob<47%');
   if(edge<.055)gateReasons.push('edge<5.5pt');
   if(!strongEvidence)gateReasons.push('evidence');
-  if(!finite(ev)||ev<=0)gateReasons.push('EV≤0');
+  if(!finite(evRet)||evRet<=0)gateReasons.push('EV≤0');
   var gate=gateReasons.length>0;
   return{
     direction:gate?'NO TRADE':dir,candidate:dir,pd:pd,po:po,edge:edge,evidence:es,align:align,q:q,
-    entry:gate?NaN:entry,sl:gate?NaN:sl,tp:gate?NaN:tp,rr:gate?NaN:rr,size:gate?NaN:sz,ev:gate?NaN:ev,
+    entry:gate?NaN:entry,sl:gate?NaN:sl,tp:gate?NaN:tp,rr:gate?NaN:rr,size:gate?NaN:sz,ev:gate?NaN:evRet,evR:gate?NaN:evR,
     pair:pair,gateReasons:gateReasons,reason:gate?'Portail fermé : '+gateReasons.join(' · '):'Portail ouvert : direction + évidence + espérance nette.'
   };
 }
@@ -491,22 +509,43 @@ function recordForecast(h,f,m,pl){
   DB.pending[key].push({ts:now(),h:h,coin:S.coin,p0:p0,paperCapital:S.capital,paperRisk:S.risk,paperFee:S.fee,targetThr:clamp((f.atr||p0*.0025)/p0*.45,.0004,.01),pBase:m.base.p.slice(),pFull:m.full.p.slice(),vBase:m.base.v.slice(),vFull:m.full.v.slice(),candidate:pl.candidate,entry:finite(pl.entry)?pl.entry:p0,dir:pl.direction,atr:f.atr,pair:pl.pair||null,sl:pl.sl,tp:pl.tp,rr:pl.rr});
   DB.pending[key]=DB.pending[key].slice(-250);save();
 }
-function pathPriceAt(t0,h){
-  var due=t0+h*60000,tick=S.tape.filter(function(x){return x.t>=t0-2000&&x.t<=due+2000&&finite(x.p)});
-  if(tick.length>=3&&tick[0].t<=t0+5000&&tick[tick.length-1].t>=due-5000){
-    for(var i=0;i<tick.length;i++)if(tick[i].t>=due-1000)return{t:tick[i].t,p:tick[i].p};
-  }
-  var first=Math.ceil(t0/60000)*60000,bars=S.hl.candles.filter(function(x){return x.t>=first&&x.t<=due+60000});
-  if(!bars.length)return null;
-  var best=bars[0],bd=Math.abs((best.t+30000)-due);
-  for(var j=1;j<bars.length;j++){var cd=Math.abs((bars[j].t+30000)-due);if(cd<bd){best=bars[j];bd=cd}}
-  return{t:best.t+30000,p:best.c};
-}
-function pathBetween(t0,h){
+function localPath(t0,h){
   var due=t0+h*60000,tick=S.tape.filter(function(x){return x.t>=t0-2000&&x.t<=due+2000&&finite(x.p)});
   if(tick.length>=3&&tick[0].t<=t0+5000&&tick[tick.length-1].t>=due-5000)return{mode:'TICK',items:tick};
-  var first=Math.ceil(t0/60000)*60000;return{mode:'CANDLE',items:S.hl.candles.filter(function(x){return x.t>=first&&x.t<=due+60000})};
+  var first=Math.ceil(t0/60000)*60000;
+  var bars=S.hl.candles.filter(function(x){return x.t>=first&&x.t<=due+60000});
+  if(bars.length>=Math.max(2,Math.min(120,h)))return{mode:'CANDLE',items:bars};
+  return null;
 }
+async function fetchPath(t0,h){
+  var local=localPath(t0,h);if(local)return local;
+  var due=t0+h*60000,start=Math.max(0,t0-60000),end=due+120000;
+  try{
+    var res=await hl({type:'candleSnapshot',req:{coin:S.coin,interval:'1m',startTime:start,endTime:end}});
+    var bars=(res||[]).map(function(q){return{t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v}}).sort(function(a,b){return a.t-b.t});
+    var first=Math.ceil(t0/60000)*60000;
+    bars=bars.filter(function(x){return x.t>=first&&x.t<=due+60000});
+    if(bars.length)return{mode:'CANDLE',items:bars};
+  }catch(e){}
+  return null;
+}
+function endpointPrice(path,t0,h){
+  if(!path||!path.items||!path.items.length)return null;
+  var due=t0+h*60000;
+  if(path.mode==='TICK'){
+    var best=null;
+    for(var i=0;i<path.items.length;i++){var x=path.items[i];if(x.t<=due+1000&&(!best||Math.abs(x.t-due)<Math.abs(best.t-due)))best=x}
+    return best&&best.t>=due-5000?best:null;
+  }
+  var bestC=null;
+  for(var j=0;j<path.items.length;j++){var q=path.items[j],closeTs=q.t+60000;if(closeTs<=due+1000&&(!bestC||closeTs>bestC.t+60000))bestC=q}
+  if(!bestC)bestC=path.items[0];
+  return{t:bestC.t+60000,p:bestC.c};
+}
+function pathPriceAt(t0,h,path){
+  return endpointPrice(path||localPath(t0,h),t0,h);
+}
+function pathBetween(t0,h){return localPath(t0,h)}
 function learnGrid(h,p,pathObj){
   if(p.dir!=='LONG'&&p.dir!=='SHORT')return;
   if(!finite(p.entry)||!finite(p.atr)||!pathObj||!pathObj.items||!pathObj.items.length)return;
@@ -522,79 +561,36 @@ function learnGrid(h,p,pathObj){
         if(hitSL2||hitTP2){out=hitSL2?-x.sl:x.tp;break}
       }
     }
-    if(out===null){
-      var last=pathObj.mode==='TICK'?items[items.length-1].p:items[items.length-1].c;
-      out=dir>0?(last-p.entry)/p.atr:(p.entry-last)/p.atr;
-    }
-    x.n++;x.ev=((x.ev*(x.n-1))+out)/x.n;
+    if(out===null){var last=pathObj.mode==='TICK'?items[items.length-1].p:items[items.length-1].c;out=dir>0?(last-p.entry)/p.atr:(p.entry-last)/p.atr;}
+    var feeR=p.entry*(2*S.fee/10000)/(p.atr*x.sl);out-=feeR;
+    x.n++;x.ev=finite(x.ev)?((x.ev*(x.n-1))+out)/x.n:out;
   }
   save();
 }
-function paperKey(h){return S.coin+'_'+h}
-function paperState(h){
-  var k=paperKey(h),p=DB.paper[k];
-  if(!p||p.capitalBase!==S.capital||p.risk!==S.risk||p.fee!==S.fee){
-    p={capitalBase:S.capital,risk:S.risk,fee:S.fee,equity:S.capital,peak:S.capital,maxDD:0,trades:0,wins:0,losses:0,overlap:0,fees:0,pnl:0,lastExit:0,curve:[{t:now(),eq:S.capital}],log:[]};
-    DB.paper[k]=p;save();
-  }
-  return p;
-}
-function paperPath(t0,h){
-  var p=pathBetween(t0,h);
-  return p;
-}
-function simulatePaperTrade(h,p,ps){
-  if(p.paperCapital!==ps.capitalBase||p.paperRisk!==ps.risk||p.paperFee!==ps.fee)return{status:'CONFIG_MISMATCH'};
-  if(p.dir==='NO TRADE'||!finite(p.entry)||!finite(p.atr)||p.entry<=0)return{status:'NO_TRADE'};
-  if(p.ts<ps.lastExit){ps.overlap++;return{status:'OVERLAP'};}
-  var pair=p.pair||{sl:.9,tp:1.25},riskDist=p.atr*pair.sl,riskCash=ps.equity*(ps.risk/100),size=riskDist>0?riskCash/riskDist:NaN;
-  if(!finite(size)||size<=0)return{status:'INVALID'};
-  var dir=p.dir==='LONG'?1:-1,sl=dir>0?p.entry-riskDist:p.entry+riskDist,tp=dir>0?p.entry+p.atr*pair.tp:p.entry-p.atr*pair.tp,path=paperPath(p.ts,h),exit=NaN,exitTs=NaN,reason='HORIZON';
-  if(path.mode==='TICK'){
-    for(var i=0;i<path.items.length;i++){
-      var q=path.items[i].p;
-      if(dir>0){if(q<=sl){exit=sl;exitTs=path.items[i].t;reason='SL';break}if(q>=tp){exit=tp;exitTs=path.items[i].t;reason='TP';break}}
-      else {if(q>=sl){exit=sl;exitTs=path.items[i].t;reason='SL';break}if(q<=tp){exit=tp;exitTs=path.items[i].t;reason='TP';break}}
+var resolving=false;
+async function resolve(){
+  if(resolving)return;resolving=true;
+  try{
+    for(var hi=0;hi<H.length;hi++){
+      var h=H[hi],key=S.coin+'_'+h,a=DB.pending[key]||[],keep=[];
+      for(var i=0;i<a.length;i++){
+        var p=a[i],due=p.ts+h*60000;
+        if(now()<due-1500){keep.push(p);continue}
+        var path=await fetchPath(p.ts,h),at=path&&pathPriceAt(p.ts,h,path);
+        if(!at){if(now()-p.ts>7*86400000)DB.expired=(DB.expired||0)+1;else keep.push(p);continue}
+        var r=at.p/p.p0-1,target=labelFromReturn(r,p.targetThr),base=model(h,'base'),full=model(h,'full');
+        var baseLog=forecastLogits(base,p.vBase),fullLog=forecastLogits(full,p.vFull);
+        var prB=sigmoid(baseLog.map(function(x){return x/(base.temp||1)})),prF=sigmoid(fullLog.map(function(x){return x/(full.temp||1)}));
+        base.obs.push({logits:baseLog,target:target,source:'LIVE'});full.obs.push({logits:fullLog,target:target,source:'LIVE'});base.obs=base.obs.slice(-300);full.obs=full.obs.slice(-300);
+        update(base,target,prB,p.vBase,true);update(full,target,prF,p.vFull,true);
+        calibrate(base,'LIVE');calibrate(full,'LIVE');
+        if(!DB.obs[key])DB.obs[key]=[];DB.obs[key].push({ts:p.ts,target:target,pb:prB,pf:prF});DB.obs[key]=DB.obs[key].slice(-500);
+        learnGrid(h,p,path);simulatePaperTrade(h,p,paperState(h));
+      }
+      DB.pending[key]=keep;
     }
-    if(!finite(exit)&&path.items.length){exit=path.items[path.items.length-1].p;exitTs=path.items[path.items.length-1].t}
-  }else{
-    for(var j=0;j<path.items.length;j++){
-      var q2=path.items[j],hitSL=dir>0?q2.l<=sl:q2.h>=sl,hitTP=dir>0?q2.h>=tp:q2.l<=tp;
-      if(hitSL||hitTP){if(hitSL){exit=sl;reason='SL'}else{exit=tp;reason='TP'}exitTs=q2.t;break}
-    }
-    if(!finite(exit)&&path.items.length){exit=path.items[path.items.length-1].c;exitTs=path.items[path.items.length-1].t+60000}
-  }
-  if(!finite(exit))return{status:'WAIT'};
-  var gross=size*(exit-p.entry)*dir,entryNotional=Math.abs(size*p.entry),exitNotional=Math.abs(size*exit),fees=(entryNotional+exitNotional)*(S.fee/10000),net=gross-fees;
-  ps.equity=Math.max(0,ps.equity+net);ps.pnl+=net;ps.fees+=fees;ps.trades++;if(net>0)ps.wins++;else ps.losses++;
-  ps.peak=Math.max(ps.peak,ps.equity);ps.maxDD=Math.max(ps.maxDD,ps.peak>0?(ps.peak-ps.equity)/ps.peak:0);ps.lastExit=exitTs||p.ts+h*60000;
-  ps.curve.push({t:exitTs||now(),eq:ps.equity});ps.curve=ps.curve.slice(-1000);
-  ps.log.push({ts:p.ts,h:h,dir:p.dir,entry:p.entry,sl:sl,tp:tp,size:size,exit:exit,reason:reason,gross:gross,fees:fees,net:net,equity:ps.equity,mode:path.mode});
-  ps.log=ps.log.slice(-500);save();
-  return{status:'EXECUTED',net:net,exit:exit,reason:reason,mode:path.mode};
-}
-function paperStats(h){
-  var p=paperState(h),retu=p.capitalBase>0?p.equity/p.capitalBase-1:NaN;
-  return{capital:p.equity,returnPct:retu,trades:p.trades,wins:p.wins,losses:p.losses,maxDD:p.maxDD,fees:p.fees,overlap:p.overlap};
-}
-function resolve(){
-  for(var hi=0;hi<H.length;hi++){
-    var h=H[hi],key=S.coin+'_'+h,a=DB.pending[key]||[],keep=[];
-    for(var i=0;i<a.length;i++){
-      var p=a[i],due=p.ts+h*60000;if(now()<due-1500){keep.push(p);continue}
-      var at=pathPriceAt(p.ts,h);if(!at){if(now()-p.ts>72*3600000){DB.expired=(DB.expired||0)+1}else keep.push(p);continue}
-      var r=at.p/p.p0-1,target=labelFromReturn(r,p.targetThr),base=model(h,'base'),full=model(h,'full');
-      var baseLog=forecastLogits(base,p.vBase),fullLog=forecastLogits(full,p.vFull);
-      var prB=sigmoid(baseLog.map(function(x){return x/(base.temp||1)})),prF=sigmoid(fullLog.map(function(x){return x/(full.temp||1)}));
-      base.obs.push({logits:baseLog,target:target,source:'LIVE'});full.obs.push({logits:fullLog,target:target,source:'LIVE'});base.obs=base.obs.slice(-300);full.obs=full.obs.slice(-300);
-      update(base,target,prB,p.vBase,true);update(full,target,prF,p.vFull,true);
-      calibrate(base,'LIVE');calibrate(full,'LIVE');
-      if(DB.obs[key]==null)DB.obs[key]=[];DB.obs[key].push({ts:p.ts,target:target,pb:prB,pf:prF});DB.obs[key]=DB.obs[key].slice(-500);
-      learnGrid(h,p,pathBetween(p.ts,h));simulatePaperTrade(h,p,paperState(h));
-    }
-    DB.pending[key]=keep;
-  }
-  save();
+    save();
+  }finally{resolving=false}
 }
 function statsFor(h){
   var m=model(h,'full'),o=DB.obs[S.coin+'_'+h]||[];
@@ -686,7 +682,7 @@ function restSpot(){
 }
 async function warmStart(){
   var key=S.coin,meta=DB.pretrain[key]||{}; meta.h=meta.h||{};
-  if(H.every(function(h){return meta.h[h]&&meta.h[h].done})){ $('learningNote').textContent='PRETRAIN déjà présent pour '+S.coin+' : le Warm-start ne réinitialise plus le live.'; $('modeBadge').textContent='LIVE'; dashboard(); return; }
+  if(H.every(function(h){return meta.h[h]&&meta.h[h].done})){ $('learningNote').textContent='PRETRAIN déjà présent pour '+S.coin+' : le Warm-start ne réinitialise plus le live. Build V12.7.'; $('modeBadge').textContent='LIVE'; dashboard(); return; }
   $('modeBadge').textContent='PRETRAIN';$('learningNote').textContent='Warm-start en cours : historique 1m prix sur la fenêtre maximale publique d’environ 3,4 jours. Le L2 historique complet n’est pas simulé.';
   meta.started=meta.started||now();DB.pretrain[key]=meta;save();
   for(var hi=0;hi<H.length;hi++){
@@ -726,10 +722,14 @@ function renderBook(f){
     '<div style="grid-column:1/-1"><div class="line"><span>Imbalance</span><b>'+pct(d.imb)+'</b></div><div class="line"><span>Microprice bias</span><b>'+pct(d.microBias,3)+'</b></div><div class="line"><span>Spread</span><b>'+pct(d.spread,4)+'</b></div></div>';
 }
 function renderCapital(){
-  $('capitalCards').innerHTML=H.map(function(h){
-    var p=paperStats(h),cls=p.returnPct>0?'up':p.returnPct<0?'down':'neu';
-    return'<div class="capitalBox"><div class="title"><b>'+hlabel(h)+'</b><span class="badge">'+p.trades+' trades</span></div><div class="tiny">DEPART '+nfmt(paperState(h).capitalBase,2)+' USDC</div><b class="'+cls+'">'+nfmt(p.capital,2)+' USDC</b><div class="capitalSub">'+(finite(p.returnPct)?((p.returnPct>=0?'+':'')+(p.returnPct*100).toFixed(2)+'%'):'—')+' · DD '+(p.maxDD*100).toFixed(2)+'% · frais '+nfmt(p.fees,2)+'</div></div>';
-  }).join('');
+  try{
+    $('capitalCards').innerHTML=H.map(function(h){
+      var p=paperStats(h),cls=p.returnPct>0?'up':p.returnPct<0?'down':'neu';
+      return'<div class="capitalBox"><div class="title"><b>'+hlabel(h)+'</b><span class="badge">'+p.trades+' trades</span></div><div class="tiny">DEPART '+nfmt(paperState(h).capitalBase,2)+'</div><b class="'+cls+'">'+nfmt(p.capital,2)+' USDC</b><div class="capitalSub">'+(finite(p.returnPct)?((p.returnPct>=0?'+':'')+(p.returnPct*100).toFixed(2)+'%'):'—')+' · DD '+(p.maxDD*100).toFixed(2)+'% · frais '+nfmt(p.fees,2)+'</div></div>';
+    }).join('');
+  }catch(e){
+    $('capitalCards').innerHTML='<div class="note">Capital paper indisponible temporairement : '+String(e.message||e)+'</div>';
+  }
 }
 function renderHealth(){
   var map=Object.keys(S.feed).map(function(k){
@@ -762,7 +762,7 @@ function dashboard(){
   $('reg').textContent='Régime '+regime+' · DQ '+q+'/100';$('dq').textContent='DQ '+q;$('score').textContent='P(L)-P(S) '+(m.p[2]-m.p[0]).toFixed(3);
   $('act').textContent=dir==='LONG'?'BUY':dir==='SHORT'?'SELL':'NO TRADE';$('ord').textContent=dir==='NO TRADE'?'ABSTAIN':'READY';
   $('entry').textContent=nfmt(pl.entry);$('sl').textContent=nfmt(pl.sl);$('tp').textContent=nfmt(pl.tp);$('rr').textContent=finite(pl.rr)?'1:'+pl.rr.toFixed(2):'—';$('size').textContent=finite(pl.size)?pl.size.toFixed(5):'—';
-  $('whyOrder').textContent=pl.reason;$('gateInfo').textContent='Candidat '+pl.candidate+' · prob '+(pl.pd*100).toFixed(1)+'% · edge '+(pl.edge*100).toFixed(1)+' pts · evidence '+(finite(pl.evidence)?pl.evidence.toFixed(3):'—')+' · poids evidence '+Math.round(m.evidenceWeight*100)+'%';$('headline').textContent=dir==='NO TRADE'?'candidat '+pl.candidate+' mais portail fermé':'plan '+(dir==='LONG'?'acheteur':'vendeur')+' généré';
+  $('whyOrder').textContent=pl.reason;$('gateInfo').textContent='Candidat '+pl.candidate+' · prob '+(pl.pd*100).toFixed(1)+'% · edge '+(pl.edge*100).toFixed(1)+' pts · EV '+(finite(pl.ev)?(pl.ev*10000).toFixed(2)+' bps':'—')+' · TP '+(pl.pair?pl.pair.tp:'—')+' ATR · SL '+(pl.pair?pl.pair.sl:'—')+' ATR · evidence '+(finite(pl.evidence)?pl.evidence.toFixed(3):'—')+' · poids evidence '+Math.round(m.evidenceWeight*100)+'%';$('headline').textContent=dir==='NO TRADE'?'candidat '+pl.candidate+' mais portail fermé':'plan '+(dir==='LONG'?'acheteur':'vendeur')+' généré';
   $('invalidate').textContent='Invalidation : DQ < 75, probabilité directionnelle < 55 %, écart direction/opposé < 8 pts, L2 absent/stale ou EV ≤ 0.';
   renderEvidence(f,m);renderBook(f);
   $('oi').textContent=nfmt(S.hl.oi,0);var old=S.hl.oiHist.filter(function(q){return q.t<=now()-5*60000}).slice(-1)[0];$('doi').textContent=old&&finite(S.hl.oi)?pct(S.hl.oi/old.v-1):'—';
@@ -775,7 +775,7 @@ function dashboard(){
   $('learnState').textContent=st.n<30?'LEARNING':st.n<100?'CALIBRATING': 'ADAPTIVE';
   $('kPrice').textContent=nfmt(S.hl.price,2);$('kDQ').textContent=q+'/100';$('kMix').textContent=Math.round(m.alpha*100)+'% FULL · '+(model(S.h,'full').liveSeen||0)+' live';$('kEdge').textContent=finite(pl.edge)?((pl.edge>=0?'+':'')+(pl.edge*100).toFixed(1)+' pt'):'—';var ages=[S.hl.lastBook,S.hl.lastTrades,S.bn.lastPerp,S.bn.lastMark].filter(function(x){return x>0}).map(function(x){return Math.max(0,now()-x)/1000});$('kFresh').textContent=ages.length?Math.round(Math.max.apply(null,ages))+'s':'—';
   $('kTarget').textContent=finite(pl.pd)?(pl.candidate+' '+(pl.pd*100).toFixed(1)+'%'): '—';
-  $('chartInfo').textContent='HL '+nfmt(S.hl.price)+' · BN '+nfmt(S.bn.price);renderCapital();renderHealth();journal();$('audit').textContent='CAPITAL PAPER = une simulation indépendante par horizon, une seule position active à la fois; sizing au risque '+S.risk+'% de l\'equity, entry/SL/TP enregistrés à t0, frais '+S.fee+' bps/side, funding exclu. Le signal combine modèle appris + evidence prior temporaire, puis retire progressivement le prior avec les OOS live. PRETRAIN prix = '+((DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[S.h]&&DB.pretrain[S.coin].h[S.h].n)||0)+' labels pour '+hlabel(S.h)+'; non présenté comme OOS full. LIVE OOS = prévision gelée à t0 puis résolue au prix observé à t0+h. BASE exclut les features microstructurelles/PASR; FULL les apprend en live. PASR = feature expérimentale, verdict par différence Brier appariée + IC approximatif à 95 %. Warm-start ne réinitialise plus le live.';
+  $('chartInfo').textContent='HL '+nfmt(S.hl.price)+' · BN '+nfmt(S.bn.price);try{renderCapital()}catch(e){} try{renderHealth()}catch(e){} try{journal()}catch(e){} $('audit').textContent='CAPITAL PAPER = une simulation indépendante par horizon, une seule position active à la fois; sizing au risque '+S.risk+'% de l\'equity, entry/SL/TP enregistrés à t0, frais '+S.fee+' bps/side, funding exclu. Le signal combine modèle appris + evidence prior temporaire, puis retire progressivement le prior avec les OOS live. PRETRAIN prix = '+((DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[S.h]&&DB.pretrain[S.coin].h[S.h].n)||0)+' labels pour '+hlabel(S.h)+'; non présenté comme OOS full. LIVE OOS = prévision gelée à t0 puis résolue au prix observé à t0+h. BASE exclut les features microstructurelles/PASR; FULL les apprend en live. PASR = feature expérimentale, verdict par différence Brier appariée + IC approximatif à 95 %. Warm-start ne réinitialise plus le live.';
 }
 async function boot(){
   await hydratePersistent();
