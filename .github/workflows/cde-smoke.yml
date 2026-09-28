@@ -44,7 +44,7 @@ jobs:
               boot:document.getElementById('bootBanner')?.textContent
             }));
             console.log(JSON.stringify({s,errors},null,2));
-            if(s.title!=='Crypto Direction Engine — V13.2')throw new Error('wrong title');
+            if(s.title!=='Crypto Direction Engine — V13.3')throw new Error('wrong title');
             if(s.dir==='CHARGEMENT'||!s.dir)throw new Error('decision did not render');
             if(s.price==='—'||!s.price)throw new Error('price did not render');
             if(!s.journal.includes('5m')||!s.journal.includes('1j'))throw new Error('journal incomplete');
