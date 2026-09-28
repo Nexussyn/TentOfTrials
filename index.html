@@ -513,8 +513,20 @@ function update(m,target,p,v,isLive){
   for(var k=0;k<3;k++){var e=(target===k?1:0)-p[k];m.b[k]=clamp(m.b[k]+lr*e,-5,5);for(var j=0;j<v.length;j++)m.w[k][j]=clamp(m.w[k][j]+lr*e*v[j],-2,2)}
   m.seen++;if(isLive)m.liveSeen=(m.liveSeen||0)+1;
 }
+function safeVector(v,n){
+  return Array.isArray(v)&&v.length>=n?v.slice(0,n).map(function(x){return finite(x)?x:0}):null;
+}
+function probsNormalize(p){
+  if(!Array.isArray(p)||p.length!==3)return null;
+  var q=p.map(function(x){return Number(x)});if(q.some(function(x){return !finite(x)||x<0}))return null;
+  var s=q[0]+q[1]+q[2];if(!(s>0))return null;return q.map(function(x){return x/s});
+}
 function forecastLogits(m,v){
-  var z=m.b.slice();for(var i=0;i<3;i++)for(var j=0;j<v.length;j++)z[i]+=(m.w[i][j]||0)*v[j];return z;
+  var vv=safeVector(v,30);if(!vv)return null;
+  var z=Array.isArray(m&&m.b)?m.b.slice(0,3):[0,0,0];
+  while(z.length<3)z.push(0);
+  for(var i=0;i<3;i++)for(var j=0;j<30;j++)z[i]+=m.w&&m.w[i]&&finite(m.w[i][j])?m.w[i][j]*vv[j]:0;
+  return z;
 }
 function paperState(h){
   var key=S.coin+'_'+h;
@@ -658,16 +670,46 @@ async function resolve(){
       for(var i=0;i<a.length;i++){
         var p=a[i],due=p.ts+h*60000;
         if(now()<due-1500){keep.push(p);continue}
-        var path=await fetchPath(p.ts,h),at=path&&pathPriceAt(p.ts,h,path);
-        if(!at){if(now()-p.ts>7*86400000)DB.expired=(DB.expired||0)+1;else keep.push(p);continue}
-        var r=at.p/p.p0-1,target=labelFromReturn(r,finite(p.targetThr)?p.targetThr:targetThreshold(p.p0,p.atr,h)),base=model(h,'base'),full=model(h,'full');
-        var baseLog=forecastLogits(base,p.vBase),fullLog=forecastLogits(full,p.vFull);
-        var prB=sigmoid(baseLog.map(function(x){return x/(base.temp||1)})),prF=sigmoid(fullLog.map(function(x){return x/(full.temp||1)}));
-        base.obs.push({logits:baseLog,target:target,source:'LIVE'});full.obs.push({logits:fullLog,target:target,source:'LIVE'});base.obs=base.obs.slice(-300);full.obs=full.obs.slice(-300);
-        update(base,target,prB,p.vBase,true);update(full,target,prF,p.vFull,true);
-        calibrate(base,'LIVE');calibrate(full,'LIVE');
-        if(!DB.obs[key])DB.obs[key]=[];DB.obs[key].push({ts:p.ts,target:target,pb:prB,pf:prF});DB.obs[key]=DB.obs[key].slice(-500);
-        learnGrid(h,p,path);simulatePaperTrade(h,p,path);if(p.paper){var led=paperState(h);led.position=null;DB.paper[key]=led;}
+        try{
+          var path=await fetchPath(p.ts,h),at=path&&pathPriceAt(p.ts,h,path);
+          if(!at){
+            if(now()-p.ts>7*86400000)DB.expired=(DB.expired||0)+1;
+            else keep.push(p);
+            continue;
+          }
+          var r=at.p/p.p0-1,target=labelFromReturn(r,finite(p.targetThr)?p.targetThr:targetThreshold(p.p0,p.atr,h));
+          var base=model(h,'base'),full=model(h,'full'),vb=safeVector(p.vBase,30),vf=safeVector(p.vFull,30),prB=null,prF=null;
+          if(vb&&vf){
+            var baseLog=forecastLogits(base,vb),fullLog=forecastLogits(full,vf);
+            if(!baseLog||!fullLog)throw new Error('frozen vectors invalid');
+            prB=sigmoid(baseLog.map(function(x){return x/(base.temp||1)}));
+            prF=sigmoid(fullLog.map(function(x){return x/(full.temp||1)}));
+            base.obs.push({logits:baseLog,target:target,source:'LIVE'});
+            full.obs.push({logits:fullLog,target:target,source:'LIVE'});
+            base.obs=base.obs.slice(-300);full.obs=full.obs.slice(-300);
+            update(base,target,prB,vb,true);update(full,target,prF,vf,true);
+            calibrate(base,'LIVE');calibrate(full,'LIVE');
+          }else{
+            // Compatibility with V13.4 pending records created before the vector-safety fix.
+            // Their frozen probabilities are valid for scoring but missing vectors cannot be
+            // reconstructed without inventing data, so the weights are not updated.
+            prB=probsNormalize(p.pBase);prF=probsNormalize(p.pFull);
+            if(!prB||!prF)throw new Error('legacy pending record has no valid frozen probabilities');
+            DB.legacyResolved=(DB.legacyResolved||0)+1;
+          }
+          if(!DB.obs[key])DB.obs[key]=[];
+          DB.obs[key].push({ts:p.ts,target:target,pb:prB,pf:prF,source:vb&&vf?'LIVE':'LEGACY'});
+          DB.obs[key]=DB.obs[key].slice(-500);
+          if(p.paper){
+            learnGrid(h,p,path);
+            simulatePaperTrade(h,p,path);
+            var led=paperState(h);led.position=null;DB.paper[key]=led;
+          }
+        }catch(e){
+          diagError('RESOLVE_'+h+'_'+i,e);
+          if(now()-p.ts>10*60000)DB.resolvedErrors=(DB.resolvedErrors||0)+1;
+          else keep.push(p);
+        }
       }
       DB.pending[key]=keep;
     }
