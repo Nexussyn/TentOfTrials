@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Crypto Direction Engine — V12.8</title>
+<title>Crypto Direction Engine — V13.0</title>
 <style>
 :root{--bg:#061016;--p:#0c1a22;--p2:#09161d;--l:#243843;--t:#edf4f7;--m:#8ea3ad;--u:#43d19d;--d:#ff7082;--n:#f0bf55;--c:#67d7ef}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 15% 0,#122a32,#061016 42%,#050b0f);color:var(--t);font:14px/1.4 system-ui,-apple-system,Segoe UI,sans-serif}
@@ -21,7 +21,7 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
 .evtop{display:flex;justify-content:space-between;gap:6px}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}.val{font-weight:820;margin-top:3px}
 .book{display:grid;grid-template-columns:1fr 1fr;gap:8px}.line{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px dashed #22353d}
 .learn{display:grid;grid-template-columns:repeat(7,1fr);gap:7px}.card b{font-size:16px}.health{display:grid;grid-template-columns:repeat(8,1fr);gap:6px}
-.ok{color:var(--u)}.warn{color:var(--n)}.bad{color:var(--d)}.chart{height:390px}.chart canvas{width:100%;height:100%;display:block}
+.ok{color:var(--u)}.warn{color:var(--n)}.bad{color:var(--d)}.diag{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;white-space:pre-wrap}.selftest{border:1px solid var(--u);color:var(--u)}.chart{height:390px}.chart canvas{width:100%;height:100%;display:block}
 .table{width:100%;border-collapse:collapse;font-size:12px}.table th,.table td{padding:6px;border-bottom:1px solid #1c3038;text-align:right}.table th:first-child,.table td:first-child{text-align:left}
 .smallcaps{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--m)}.green{color:var(--u)}.red{color:var(--d)}.amber{color:var(--n)}
 .kpi{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}.capitalGrid{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}.capitalBox{padding:10px;border:1px solid var(--l);background:#09151b;border-radius:10px}.capitalBox b{font-size:18px}.capitalSub{margin-top:3px;font-size:11px;color:var(--m)}.kbox{padding:9px;border:1px solid var(--l);background:#09151b;border-radius:9px}.kbox b{font-size:17px}
@@ -32,7 +32,7 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
 <body>
 <header class="top">
   <div>
-    <div class="brand">CRYPTO DIRECTION ENGINE · V12.8</div>
+    <div class="brand">CRYPTO DIRECTION ENGINE · V13.0</div>
     <div class="tag">Hyperliquid primaire · Binance cross-venue · self-evaluating · persistance double · OOS résoluble après fermeture · aucune exécution réelle</div>
   </div>
   <div class="ctrl">
@@ -46,6 +46,7 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
 </header>
 
 <main class="wrap">
+<div id="bootBanner" class="panel note" style="display:none"></div>
 <div class="panel note">
   <b>SORTIE UNIQUE :</b> <span id="headline">initialisation…</span>
   · <b>NO TRADE</b> est une décision valide.
@@ -221,12 +222,24 @@ var STORE='cde_persistent_v2';
 var LEGACY_STORES=['cde_v11_learning_v1','cde_public_learning_v10'];
 var IDB_NAME='CDE_PERSISTENT_DB',IDB_VERSION=1,IDB_STORE='snapshots';
 var now=function(){return Date.now()};
+var SELFTEST=new URLSearchParams(location.search).get('selftest')==='1';
+var BOOT_STAGE='HTML';
+var LAST_ERROR='';
+function diagError(stage,e){
+  LAST_ERROR=String((e&&e.stack)||e||'unknown error'); BOOT_STAGE=stage;
+  var el=document.getElementById('bootBanner'); if(el){el.style.display='block';el.className='panel note diag';el.textContent='CDE ERROR · '+stage+'\\n'+LAST_ERROR}
+  try{console.error('[CDE]',stage,e)}catch(_){}
+}
+window.addEventListener('error',function(e){diagError('window.error',e.error||e.message)});
+window.addEventListener('unhandledrejection',function(e){diagError('unhandledrejection',e.reason)});
+function stage(s){BOOT_STAGE=s;var el=document.getElementById('modeBadge');if(el)el.textContent=s}
+
 var clamp=function(x,a,b){return Math.max(a,Math.min(b,x))};
 var finite=function(x){return Number.isFinite(x)};
 var pct=function(x,d){return finite(x)?(100*x).toFixed(d==null?1:d)+'%':'—'};
 var nfmt=function(x,d){return finite(x)?Number(x).toLocaleString('fr-FR',{maximumFractionDigits:d==null?2:d}):'—'};
 function withTimeout(p,ms,label){return Promise.race([p,new Promise(function(_,rej){setTimeout(function(){rej(new Error((label||'operation')+' timeout'))},ms)})])}
-async function fetchJSON(url,opt,ms){var ctrl=window.AbortController?new AbortController():null,opt2=opt||{};if(ctrl)opt2.signal=ctrl.signal;var timer=setTimeout(function(){try{if(ctrl)ctrl.abort()}catch(e){}},ms||7000);try{var r=await fetch(url,opt2);if(!r.ok)throw new Error('HTTP '+r.status);return await r.json()}finally{clearTimeout(timer)}}
+async function fetchJSON(url,opt,ms){var ctrl=window.AbortController?new AbortController():null,opt2=opt||{};if(ctrl)opt2.signal=ctrl.signal;var timer=setTimeout(function(){try{if(ctrl)ctrl.abort()}catch(e){}},ms||7000);try{var r=await fetch(url,opt2);if(!r.ok)throw new Error('HTTP '+r.status+' · '+url);return await r.json()}finally{clearTimeout(timer)}}
 
 function blankDB(){return{models:{},pending:{},obs:{},grid:{},pretrain:{},pasr:{},paper:{},updatedAt:0}}
 function normalizeDB(d){
@@ -322,7 +335,7 @@ var S={
   tape:[],feed:{HL_WS:'INIT',HL_L2:'INIT',HL_TRADES:'INIT',HL_CANDLE:'INIT',HL_CTX:'INIT',BN_WS:'INIT',BN_REST:'INIT',BN_SPOT:'INIT'}
 };
 
-function save(){try{localStorage.setItem(ST,JSON.stringify(DB))}catch(e){}}
+
 function newM(){return{w:Array.from({length:3},function(){return Array(30).fill(0)}),b:[0,0,0],seen:0,liveSeen:0,temp:1,obs:[]}}
 function model(h,k){var key=S.coin+'_'+h;if(!DB.models[key])DB.models[key]={base:newM(),full:newM()};var m=DB.models[key][k]||newM();if(!m.w||m.w.length!==3||m.w.some(function(row){return !row||row.length!==30})){var oldW=m.w||[];m.w=Array.from({length:3},function(_,i){var row=(oldW[i]||[]).slice(0,30);while(row.length<30)row.push(0);return row});m.b=m.b||[0,0,0];m.seen=m.seen||0;m.liveSeen=m.liveSeen==null?((DB.obs[key]||[]).length):m.liveSeen;m.temp=m.temp||1;m.obs=m.obs||[]}DB.models[key][k]=m;return m}
 function sigmoid(z){var m=Math.max.apply(null,z),e=z.map(function(v){return Math.exp(clamp(v-m,-30,30))}),s=e.reduce(function(a,b){return a+b},0);return e.map(function(v){return v/s})}
@@ -682,7 +695,7 @@ function restSpot(){
 }
 async function warmStart(){
   var key=S.coin,meta=DB.pretrain[key]||{}; meta.h=meta.h||{};
-  if(H.every(function(h){return meta.h[h]&&meta.h[h].done})){ $('learningNote').textContent='PRETRAIN déjà présent pour '+S.coin+' : le Warm-start ne réinitialise plus le live. Build V12.8.'; $('modeBadge').textContent='LIVE'; dashboard(); return; }
+  if(H.every(function(h){return meta.h[h]&&meta.h[h].done})){ $('learningNote').textContent='PRETRAIN déjà présent pour '+S.coin+' : le Warm-start ne réinitialise plus le live. Build V13.0.'; $('modeBadge').textContent='LIVE'; dashboard(); return; }
   $('modeBadge').textContent='PRETRAIN';$('learningNote').textContent='Warm-start en cours : historique 1m prix sur la fenêtre maximale publique d’environ 3,4 jours. Le L2 historique complet n’est pas simulé.';
   meta.started=meta.started||now();DB.pretrain[key]=meta;save();
   for(var hi=0;hi<H.length;hi++){
@@ -699,7 +712,7 @@ async function warmStart(){
       }
       bm.obs=bm.obs.slice(-300);fm.obs=fm.obs.slice(-300);
       calibrate(bm,'PRETRAIN');calibrate(fm,'PRETRAIN'); meta.h[h].n=bm.seen; meta.h[h].done=true;
-    }catch(e){}
+    }catch(e){diagError('PRETRAIN_'+h,e)}
     var total=H.reduce(function(s,hh){return s+((meta.h[hh]&&meta.h[hh].n)||0)},0);meta.n=total;DB.pretrain[key]=meta;save();
     $('hist').textContent=(meta.h[S.h]&&meta.h[S.h].n)||0;await new Promise(function(r){setTimeout(r,0)});
   }
@@ -777,17 +790,62 @@ function dashboard(){
   $('kTarget').textContent=finite(pl.pd)?(pl.candidate+' '+(pl.pd*100).toFixed(1)+'%'): '—';
   $('chartInfo').textContent='HL '+nfmt(S.hl.price)+' · BN '+nfmt(S.bn.price);try{renderCapital()}catch(e){} try{renderHealth()}catch(e){} try{journal()}catch(e){} $('audit').textContent='CAPITAL PAPER = une simulation indépendante par horizon, une seule position active à la fois; sizing au risque '+S.risk+'% de l\'equity, entry/SL/TP enregistrés à t0, frais '+S.fee+' bps/side, funding exclu. Le signal combine modèle appris + evidence prior temporaire, puis retire progressivement le prior avec les OOS live. PRETRAIN prix = '+((DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[S.h]&&DB.pretrain[S.coin].h[S.h].n)||0)+' labels pour '+hlabel(S.h)+'; non présenté comme OOS full. LIVE OOS = prévision gelée à t0 puis résolue au prix observé à t0+h. BASE exclut les features microstructurelles/PASR; FULL les apprend en live. PASR = feature expérimentale, verdict par différence Brier appariée + IC approximatif à 95 %. Warm-start ne réinitialise plus le live.';
 }
+function syntheticState(){
+  var t=now(),base=83250;
+  S.hl.price=base;S.hl.lastPrice=t;S.hl.lastBook=t;S.hl.lastTrades=t;S.hl.lastCtx=t;
+  S.bn.price=base*1.0002;S.bn.lastMark=t;S.bn.lastSpot=t;S.bn.lastPerp=t;S.bn.lastLiq=t;
+  S.hl.oi=36500;S.hl.funding=0.00001;
+  S.hl.book={levels:[[],[]]};
+  S.hl.book.levels[0]=Array.from({length:10},function(_,i){return{px:String(base-i*.5),sz:String(30-i)}});
+  S.hl.book.levels[1]=Array.from({length:10},function(_,i){return{px:String(base+.5+i*.5),sz:String(12+i*.4)}});
+  S.hl.candles=[];for(var i=0;i<400;i++){var p=base+i*.08;S.hl.candles.push({t:t-(400-i)*60000,o:p-2,h:p+3,l:p-3,c:p,v:100+i})}
+  S.hl.trades=[];for(var j=0;j<300;j++)S.hl.trades.push({time:t-j*1000,side:j%5? 'B':'S',sz:1+j/100});
+  S.bn.spot=[];S.bn.perp=[];S.bn.liq=[];
+  for(var k=0;k<800;k++){S.bn.spot.push({time:t-k*1000,side:k%3?'B':'S',sz:1});S.bn.perp.push({time:t-k*1000,side:k%4?'S':'B',sz:1})}
+  S.feed={HL_WS:'OK',HL_L2:'OK',HL_TRADES:'OK',HL_CANDLE:'OK',HL_CTX:'OK',BN_WS:'OK',BN_REST:'OK',BN_SPOT:'OK'};
+}
+function assertSelfTest(){
+  var must=['dir','matrix','book','journal','capitalCards','health'];for(var i=0;i<must.length;i++)if(!document.getElementById(must[i]))throw Error('missing DOM '+must[i]);
+  var d=$('dir').textContent;if(!d||d==='CHARGEMENT')throw Error('decision not rendered');
+  if($('journal').textContent.indexOf('5m')<0)throw Error('journal not rendered');
+  if($('capitalCards').textContent.indexOf('1000')<0)throw Error('capital cards not rendered');
+  var b=$('kPrice').textContent;if(!b||b==='—')throw Error('price KPI not rendered');
+  var el=$('bootBanner');el.style.display='block';el.className='panel note diag selftest';el.textContent='CDE SELFTEST PASS · UI + moteur local déterministe OK · aucune connexion réseau requise.';
+}
 async function boot(){
-  // Never block the dashboard on persistence or REST networking.
-  try{await withTimeout(hydratePersistent(),1800,'IndexedDB hydration')}catch(e){}
-  S.coin=$('coin').value;S.h=+$('hor').value;S.capital=+$('capital').value||1000;S.risk=+$('risk').value||.5;S.fee=+$('fee').value||0;
-  for(var pi=0;pi<H.length;pi++)paperState(H[pi]);
-  dashboard();
-  reconnectHL();reconnectBN();restSpot();
-  restSync().then(function(){dashboard()}).catch(function(){$('headline').textContent='flux REST indisponible; attente des WebSockets';dashboard()});
-  warmStart().then(function(){dashboard()}).catch(function(e){$('learningNote').textContent='PRETRAIN interrompu : '+String(e.message||e);dashboard()});
-  setInterval(function(){if(now()-S.lastRest>15000)restSync().catch(function(){});restSpot();resolve().catch(function(){});try{dashboard()}catch(e){$('headline').textContent='erreur de rendu : '+String(e.message||e)}},5000);
-  setInterval(function(){if(now()-S.lastForecast>55000){for(var i=0;i<H.length;i++){var f=feats(),m=mixed(H[i],f),pl=orderPlan(H[i],f);recordForecast(H[i],f,m,pl)}S.lastForecast=now()}},5000);
+  try{
+    stage('BOOT');
+    S.coin=$('coin').value;S.h=+$('hor').value;S.capital=+$('capital').value||1000;S.risk=+$('risk').value||.5;S.fee=+$('fee').value||0;
+    for(var pi=0;pi<H.length;pi++)paperState(H[pi]);
+    dashboard();
+    if(SELFTEST){
+      stage('SELFTEST');syntheticState();dashboard();assertSelfTest();stage('SELFTEST PASS');return;
+    }
+    try{await withTimeout(hydratePersistent(),1200,'persistence hydration')}catch(e){diagError('persistence',e)}
+    dashboard();
+    stage('CONNECTING');
+    reconnectHL();reconnectBN();restSpot();
+    restSync().then(function(){dashboard()}).catch(function(e){diagError('REST',e);dashboard()});
+    warmStart().then(function(){dashboard()}).catch(function(e){diagError('WARM_START',e);dashboard()});
+    setInterval(function(){
+      if(now()-S.lastRest>15000)restSync().catch(function(e){diagError('REST_LOOP',e)});
+      restSpot();
+      resolve().catch(function(e){diagError('RESOLVE',e)});
+      try{dashboard()}catch(e){diagError('RENDER_LOOP',e)}
+    },5000);
+    setInterval(function(){
+      if(now()-S.lastForecast>55000){
+        try{
+          for(var i=0;i<H.length;i++){var f=feats(),m=mixed(H[i],f),pl=orderPlan(H[i],f,m);recordForecast(H[i],f,m,pl)}
+          S.lastForecast=now();
+        }catch(e){diagError('FORECAST',e)}
+      }
+    },5000);
+    stage('LIVE');
+  }catch(e){
+    diagError('BOOT_FATAL',e);
+    try{dashboard()}catch(_){}
+  }
 }
 $('coin').onchange=function(){S.coin=$('coin').value;location.reload()};
 $('hor').onchange=function(){S.h=+$('hor').value;dashboard()};
