@@ -1,5 +1,6 @@
 name: CDE smoke test
 on:
+  pull_request:
   push:
     paths:
       - 'index.html'
