@@ -95,12 +95,12 @@ function features(){
   cross:clamp((cross||0)*500+clamp((r5||0)*450,-.7,.7),-1,1),
   pasr:c4.z
  };
- const qn=[S.hlPrice,bt,d.imb,r5,r15,r60,flow,fd,oi].filter(Number.isFinite).length,dis=Math.sqrt(Object.values(blocks).reduce((s,x)=>s+(x-(blocks.structure*.30+blocks.flow*.22+blocks.l2*.18+blocks.derivatives*.12+blocks.cross*.12+blocks.pasr*.06))**2,0)/6);
+ const qn=[S.hlPrice,bt,d.imb,r5,r15,r60,flow,fd,oi].filter(Number.isFinite).length,prior=blocks.structure*.26+blocks.flow*.20+blocks.l2*.16+blocks.derivatives*.11+blocks.cross*.10+blocks.absorption*.09+blocks.pasr*.08,dis=Math.sqrt(Object.values(blocks).reduce((s,x)=>s+(x-prior)**2,0)/7);
  const quality=Math.round(clamp(100*(.62*qn/9+.28*(1-clamp(dis,0,1))+.10*(S.book?1:0)),0,100));
  return{...blocks,quality,dis,atr:atr(c.slice(-120)),c4:c4.z};
 }
 function featureVector(f,includePasr){return [f.structure,f.flow,f.l2,f.derivatives,f.cross,f.absorption,...(includePasr?[f.pasr]:[])].map(x=>Number.isFinite(x)?x:0)}
-function scoreModel(f,h,kind){let m=getModel(h,kind),v=featureVector(f,kind==='full'),keys=kind==='full'?['structure','flow','l2','derivatives','cross','pasr']:['structure','flow','l2','derivatives','cross'];let s=m.b;for(let i=0;i<keys.length;i++)s+=(m.w[keys[i]]||0)*v[i];return{s,v,model:m,keys}}
+function scoreModel(f,h,kind){let m=getModel(h,kind),v=featureVector(f,kind==='full'),keys=kind==='full'?['structure','flow','l2','derivatives','cross','absorption','pasr']:['structure','flow','l2','derivatives','cross','absorption'];let s=m.b;for(let i=0;i<keys.length;i++)s+=(m.w[keys[i]]||0)*v[i];return{s,v,model:m,keys}}
 function predict(h,f,kind){
  const g=scoreModel(f,h,kind), z=sig(g.s), rawLong=z, pN=clamp(.18+f.dis*.44+(100-f.quality)*.002,.18,.68), dirMass=1-pN;
  return{score:g.s,pLong=pN/2+dirMass*rawLong,pNeutral:pN,pShort=pN/2+dirMass*(1-rawLong),v:g.v,model:g.model,keys:g.keys};
@@ -131,7 +131,7 @@ function outcomeFrom(p,current){
 function settle(){
  const arr=getPending(),keep=[],cur=S.hlPrice;if(!Number.isFinite(cur))return;
  for(const p of arr){
-  const age=now()-p.ts,h=p.h*60000;if(p.coin!==S.coin||age<h*.85){keep.push(p);continue}
+  const age=now()-p.ts,h=p.h*60000;if(p.coin!==S.coin||age<h*.90){keep.push(p);continue} if(age>h*1.50){continue}
   const y=outcomeFrom(p,cur); if(y===null){keep.push(p);continue}
   const hkey=String(p.h),mf=getModel(hkey,'full'),mb=getModel(hkey,'base');
   function update(m,keys,v,prob){
