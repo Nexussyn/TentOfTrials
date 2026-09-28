@@ -93,6 +93,7 @@ function features(){
   l2:clamp((d.imb||0)*1.5+(d.bias||0)*3200,-1,1),
   derivatives:clamp(-(fd||0)*4200,-1,1),
   cross:clamp((cross||0)*500+clamp((r5||0)*450,-.7,.7),-1,1),
+  absorption:clamp(-((flow||0)*(r5||0))*90000,-1,1),
   pasr:c4.z
  };
  const qn=[S.hlPrice,bt,d.imb,r5,r15,r60,flow,fd,oi].filter(Number.isFinite).length,prior=blocks.structure*.26+blocks.flow*.20+blocks.l2*.16+blocks.derivatives*.11+blocks.cross*.10+blocks.absorption*.09+blocks.pasr*.08,dis=Math.sqrt(Object.values(blocks).reduce((s,x)=>s+(x-prior)**2,0)/7);
@@ -112,7 +113,7 @@ function combinedPrediction(h,f){
  return{full:a,base:b,pLong:clamp(pl,0,1),pShort:clamp(ps,0,1),pNeutral:clamp(pn,0,1)};
 }
 function orderPlan(h,f,p){
- const d=p.pLong>p.pShort?'LONG':p.pShort>p.pLong?'SHORT':'NEUTRAL',d2=depth(S.book),px=d==='LONG'?d2.ask:S.hlPrice,diff=Math.max(Number.isFinite(f.atr)?f.atr:Math.abs(px*(Number.isFinite(S.hlRV)?S.hlRV*Math.sqrt(h/1):.002)),Math.abs(px)*(d2.spread||0)*3);
+ const d=p.pLong>p.pShort?'LONG':p.pShort>p.pLong?'SHORT':'NEUTRAL',d2=depth(S.book),px=d==='LONG'?d2.ask:d==='SHORT'?d2.bid:S.hlPrice,diff=Math.max(Number.isFinite(f.atr)?f.atr:Math.abs(px*(Number.isFinite(S.hlRV)?S.hlRV*Math.sqrt(h/1):.002)),Math.abs(px)*(d2.spread||0)*3);
  const risk=C(diff*(.75+.10*Math.log10(Math.max(h,5))),px*.0012,px*.04),rrTarget=ST.tpByH?.[h]?.n>=30?ST.tpByH[h].rr:1.5,sl=d==='LONG'?px-risk:d==='SHORT'?px+risk:NaN,tp=d==='LONG'?px+risk*rrTarget:d==='SHORT'?px-risk*rrTarget:NaN;
  const no=S.offline||f.quality<62||Math.max(p.pLong,p.pShort)<.60||f.dis>.57||!Number.isFinite(px);
  return{direction:no?'NO TRADE':d,entry:no?NaN:px,sl:no?NaN:sl,tp:no?NaN:tp,rr:rrTarget,risk,reason:no?'Couverture insuffisante, conflit trop élevé ou probabilité sous le seuil.':'Plan mécanique validé par couverture, qualité et dominance directionnelle.'};
@@ -136,7 +137,7 @@ function settle(){
   const hkey=String(p.h),mf=getModel(hkey,'full'),mb=getModel(hkey,'base');
   function update(m,keys,v,prob){
    const yy=y,err=yy-prob,lr=.035/(1+m.seen*.002);m.b+=lr*err;for(let i=0;i<keys.length;i++){let k=keys[i];m.w[k]=clamp((m.w[k]||0)+lr*err*v[i],-1.5,1.5)}m.seen++;
-   const br=(prob-yy)**2,ll=-Math.log(clamp(yy?prob:1-prob,1e-6,1));m.brierSum+=br;m.llSum+=ll;m.brier.push(br);m.ll.push(ll);if(m.brier.length>250)m.brier.shift();if(m.ll.length>250)m.ll.shift();if((prob>=.5)===(yy===1))m.hits++;
+   const br=(prob-yy)**2,ll=-Math.log(clamp(yy?prob:1-prob,1e-6,1));m.brierSum=(m.brierSum||0)+br;m.llSum=(m.llSum||0)+ll;m.brier.push(br);m.ll.push(ll);if(m.brier.length>250)m.brier.shift();if(m.ll.length>250)m.ll.shift();if((prob>=.5)===(yy===1))m.hits++;
   }
   update(mf,['structure','flow','l2','derivatives','cross','absorption','pasr'],p.full.v,p.full.pLong/(p.full.pLong+p.full.pShort));
   update(mb,['structure','flow','l2','derivatives','cross','absorption'],p.base.v,p.base.pLong/(p.base.pLong+p.base.pShort));
