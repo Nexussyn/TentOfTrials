@@ -1,77 +1,586 @@
 <!doctype html>
-<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Crypto Direction Engine — Public</title>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Crypto Direction Engine — V11</title>
 <style>
-:root{--bg:#061016;--p:#0c1a22;--p2:#0a151b;--l:#243843;--t:#edf4f7;--m:#8ea3ad;--u:#43d19d;--d:#ff7082;--n:#f0bf55;--c:#67d7ef}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 15% 0,#122a32,#061016 42%,#050b0f);color:var(--t);font:14px/1.4 system-ui,-apple-system,Segoe UI,sans-serif}.top{position:sticky;top:0;z-index:5;padding:12px 16px;background:#061016ea;backdrop-filter:blur(10px);border-bottom:1px solid var(--l);display:flex;justify-content:space-between;gap:12px;align-items:center}.brand{font-weight:900;letter-spacing:.06em}.tag,.tiny{font-size:11px;color:var(--m)}.ctrl{display:flex;gap:7px;align-items:center;flex-wrap:wrap}select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);border-radius:8px;padding:8px 10px}button{cursor:pointer}.wrap{max-width:1480px;margin:auto;padding:14px}.grid{display:grid;grid-template-columns:1.35fr .9fr;gap:12px}.panel{background:linear-gradient(180deg,#102029f5,#09151bf5);border:1px solid var(--l);border-radius:14px;padding:13px;box-shadow:0 12px 28px #0002}.full{grid-column:1/-1}.hero{display:grid;grid-template-columns:1.02fr .98fr;gap:12px}.decision{min-height:210px;display:flex;flex-direction:column;justify-content:space-between}.ey{font-size:10px;text-transform:uppercase;letter-spacing:.15em;color:var(--m)}.dir{font-size:57px;font-weight:950;line-height:1;letter-spacing:-.05em;margin:8px 0}.up{color:var(--u)}.down{color:var(--d)}.neu{color:var(--n)}.prob{font-size:30px;font-weight:900}.bars{height:9px;border-radius:99px;overflow:hidden;background:#182830;display:flex;margin:8px 0}.bars i{display:block}.title{display:flex;justify-content:space-between;align-items:center;margin-bottom:9px}.title h3{margin:0;font-size:13px}.badge{padding:3px 7px;border-radius:999px;background:#172730;font-size:10px}.order{display:grid;grid-template-columns:repeat(6,1fr);gap:7px}.box,.metric{background:#09151b;border:1px solid var(--l);border-radius:9px;padding:8px}.big{font-weight:900;font-size:17px;margin-top:2px}.note{padding:9px;background:#09151b;border:1px solid var(--l);border-radius:9px;color:var(--m)}.matrix{display:grid;grid-template-columns:1fr 1fr;gap:7px}.ev{background:#09151b;border:1px solid var(--l);border-radius:9px;padding:8px}.evtop{display:flex;justify-content:space-between}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}.val{font-weight:820;margin-top:3px}.book{display:grid;grid-template-columns:1fr 1fr;gap:8px}.line{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px dashed #22353d}.learn{display:grid;grid-template-columns:repeat(7,1fr);gap:7px}.card{background:#09151b;border:1px solid var(--l);border-radius:9px;padding:8px}.card b{font-size:16px}.health{display:grid;grid-template-columns:repeat(8,1fr);gap:6px}.src{background:#08141a;border:1px solid var(--l);border-radius:8px;padding:7px}.ok{color:var(--u)}.warn{color:var(--n)}.bad{color:var(--d)}.chart{height:390px}.chart canvas{width:100%;height:100%;display:block}.table{width:100%;border-collapse:collapse;font-size:12px}.table th,.table td{padding:6px;border-bottom:1px solid #1c3038;text-align:right}.table th:first-child,.table td:first-child{text-align:left}.smallcaps{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--m)}.green{color:var(--u)}.red{color:var(--d)}.amber{color:var(--n)}@media(max-width:1050px){.grid,.hero{grid-template-columns:1fr}.order{grid-template-columns:repeat(3,1fr)}.stats{grid-template-columns:1fr 1fr}.health{grid-template-columns:repeat(4,1fr)}.learn{grid-template-columns:repeat(4,1fr)}}@media(max-width:620px){.wrap{padding:8px}.order{grid-template-columns:1fr 1fr}.matrix,.book{grid-template-columns:1fr}.health,.learn{grid-template-columns:1fr 1fr}.dir{font-size:43px}}
-</style></head>
+:root{--bg:#061016;--p:#0c1a22;--p2:#09161d;--l:#243843;--t:#edf4f7;--m:#8ea3ad;--u:#43d19d;--d:#ff7082;--n:#f0bf55;--c:#67d7ef}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 15% 0,#122a32,#061016 42%,#050b0f);color:var(--t);font:14px/1.4 system-ui,-apple-system,Segoe UI,sans-serif}
+.top{position:sticky;top:0;z-index:10;padding:10px 16px;background:#061016ec;backdrop-filter:blur(10px);border-bottom:1px solid var(--l);display:flex;justify-content:space-between;gap:14px;align-items:center}
+.brand{font-weight:950;letter-spacing:.07em}.tag,.tiny{font-size:11px;color:var(--m)}.ctrl{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);border-radius:8px;padding:8px 10px}button{cursor:pointer}button:hover{border-color:#49606c}
+.ctrl input{width:116px}.wrap{max-width:1500px;margin:auto;padding:14px}.grid{display:grid;grid-template-columns:1.32fr .92fr;gap:12px}
+.panel{background:linear-gradient(180deg,#102029f5,#09151bf5);border:1px solid var(--l);border-radius:14px;padding:13px;box-shadow:0 12px 28px #0002}.full{grid-column:1/-1}
+.hero{display:grid;grid-template-columns:1.03fr .97fr;gap:12px}.decision{min-height:214px;display:flex;flex-direction:column;justify-content:space-between}
+.ey{font-size:10px;text-transform:uppercase;letter-spacing:.15em;color:var(--m)}.dir{font-size:58px;font-weight:950;line-height:1;letter-spacing:-.05em;margin:8px 0}.up{color:var(--u)}.down{color:var(--d)}.neu{color:var(--n)}
+.prob{font-size:29px;font-weight:900}.bars{height:9px;border-radius:99px;overflow:hidden;background:#182830;display:flex;margin:8px 0}.bars i{display:block}
+.title{display:flex;justify-content:space-between;align-items:center;margin-bottom:9px}.title h3{margin:0;font-size:13px}.badge{padding:3px 7px;border-radius:999px;background:#172730;font-size:10px}
+.order{display:grid;grid-template-columns:repeat(6,1fr);gap:7px}.box,.metric,.card,.ev,.src{background:#09151b;border:1px solid var(--l);border-radius:9px;padding:8px}.big{font-weight:900;font-size:17px;margin-top:2px}
+.note{padding:9px;background:#09151b;border:1px solid var(--l);border-radius:9px;color:var(--m)}.matrix{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.evtop{display:flex;justify-content:space-between;gap:6px}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}.val{font-weight:820;margin-top:3px}
+.book{display:grid;grid-template-columns:1fr 1fr;gap:8px}.line{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px dashed #22353d}
+.learn{display:grid;grid-template-columns:repeat(7,1fr);gap:7px}.card b{font-size:16px}.health{display:grid;grid-template-columns:repeat(8,1fr);gap:6px}
+.ok{color:var(--u)}.warn{color:var(--n)}.bad{color:var(--d)}.chart{height:390px}.chart canvas{width:100%;height:100%;display:block}
+.table{width:100%;border-collapse:collapse;font-size:12px}.table th,.table td{padding:6px;border-bottom:1px solid #1c3038;text-align:right}.table th:first-child,.table td:first-child{text-align:left}
+.smallcaps{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--m)}.green{color:var(--u)}.red{color:var(--d)}.amber{color:var(--n)}
+.kpi{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}.kbox{padding:9px;border:1px solid var(--l);background:#09151b;border-radius:9px}.kbox b{font-size:17px}
+@media(max-width:1080px){.grid,.hero{grid-template-columns:1fr}.order{grid-template-columns:repeat(3,1fr)}.stats{grid-template-columns:1fr 1fr}.health{grid-template-columns:repeat(4,1fr)}.learn{grid-template-columns:repeat(4,1fr)}}
+@media(max-width:650px){.wrap{padding:8px}.order{grid-template-columns:1fr 1fr}.matrix,.book{grid-template-columns:1fr}.health,.learn,.kpi{grid-template-columns:1fr 1fr}.dir{font-size:44px}}
+</style>
+</head>
 <body>
-<header class="top"><div><div class="brand">CRYPTO DIRECTION ENGINE</div><div class="tag">Public Internet · Hyperliquid primary · 2 WebSockets · self-evaluating</div></div><div class="ctrl"><select id="coin"><option>BTC</option><option>ETH</option><option>SOL</option></select><select id="hor"><option value="5">5m</option><option value="15" selected>15m</option><option value="60">1h</option><option value="240">4h</option></select><input id="capital" type="number" value="1000" min="10" step="10"><input id="risk" type="number" value="0.5" min="0.05" max="5" step="0.05"><button id="relearn">Warm-start</button></div></header>
+<header class="top">
+  <div>
+    <div class="brand">CRYPTO DIRECTION ENGINE · V11</div>
+    <div class="tag">Hyperliquid primaire · Binance cross-venue · self-evaluating · aucune exécution réelle</div>
+  </div>
+  <div class="ctrl">
+    <select id="coin" title="Marché analysé"><option>BTC</option><option>ETH</option><option>SOL</option></select>
+    <select id="hor" title="Horizon de résolution de la prévision"><option value="5" selected>5m</option><option value="15">15m</option><option value="60">1h</option><option value="240">4h</option></select>
+    <input id="capital" type="number" value="1000" min="10" step="10" title="Capital de référence en USDC">
+    <input id="risk" type="number" value="0.5" min="0.05" max="5" step="0.05" title="Risque maximum théorique par idée, en % du capital">
+    <button id="relearn" title="Initialise le modèle une fois à partir de l'historique prix; ne détruit pas l'apprentissage live">Warm-start</button>
+  </div>
+</header>
+
 <main class="wrap">
-<div class="panel note"><b>SORTIE UNIQUE :</b> <span id="headline">initialisation des flux réels…</span> · <b>NO TRADE</b> est une décision valide. Missing ≠ neutral. Aucune exécution d'ordre.</div>
+<div class="panel note">
+  <b>SORTIE UNIQUE :</b> <span id="headline">initialisation…</span>
+  · <b>NO TRADE</b> est une décision valide.
+  · <b>Missing ≠ neutral</b> : une donnée absente retire la feature et ferme le portail de qualité si nécessaire.
+</div>
+
 <div class="grid" style="margin-top:12px">
 <section>
 <div class="hero">
-<div class="panel decision"><div><div class="ey">Décision maintenant</div><div id="dir" class="dir neu">CHARGEMENT</div><div id="reg" class="tiny">—</div></div><div><div id="prob" class="prob">—</div><div class="tiny">dominance directionnelle · <span id="hz">15m</span></div><div class="bars"><i id="bL"></i><i id="bN"></i><i id="bS"></i></div><div class="tiny" style="display:flex;justify-content:space-between"><span>LONG <b id="pL">—</b></span><span>NEUTRAL <b id="pN">—</b></span><span>SHORT <b id="pS">—</b></span></div></div></div>
-<div class="panel"><div class="title"><h3>ORDRE À PLACER</h3><span id="ord" class="badge">—</span></div><div class="order"><div class="box"><div class="smallcaps">Action</div><div id="act" class="big">—</div></div><div class="box"><div class="smallcaps">Entrée</div><div id="entry" class="big">—</div></div><div class="box"><div class="smallcaps">SL</div><div id="sl" class="big">—</div></div><div class="box"><div class="smallcaps">TP</div><div id="tp" class="big">—</div></div><div class="box"><div class="smallcaps">R:R</div><div id="rr" class="big">—</div></div><div class="box"><div class="smallcaps">Taille</div><div id="size" class="big">—</div></div></div><div id="whyOrder" class="note" style="margin-top:9px">—</div></div>
-<div class="panel chart"><div class="title"><h3>Prix · 1 minute</h3><span id="chartInfo" class="tiny">—</span></div><canvas id="chart"></canvas></div>
-<div class="panel"><div class="title"><h3>Pourquoi ce plan</h3><span id="dq" class="badge">DQ —</span></div><div id="why" class="matrix"></div><div id="invalidate" class="note" style="margin-top:9px">—</div></div>
-</section>
-<aside>
-<div class="panel"><div class="title"><h3>Evidence Matrix</h3><span id="score" class="badge">—</span></div><div id="matrix" class="matrix"></div></div>
-<div class="panel" style="margin-top:12px"><div class="title"><h3>PASR-C4 · apport incrémental</h3><span id="pasrState" class="badge">WARMING</span></div><div class="learn"><div class="card"><div class="tiny">C4</div><b id="c4">—</b></div><div class="card"><div class="tiny">POIDS</div><b id="pasrW">—</b></div><div class="card"><div class="tiny">Δ BRIER</div><b id="deltaB">—</b></div><div class="card"><div class="tiny">OOS</div><b id="pasrN">0</b></div><div class="card"><div class="tiny">VERDICT</div><b id="pasrV">WARMING</b></div><div class="card"><div class="tiny">BUCKETS</div><b id="bucketN">0</b></div><div class="card"><div class="tiny">COMPARE</div><b>BASE/FULL</b></div></div><div class="tiny" style="margin-top:8px">Le PASR est exclu du modèle BASE. Son utilité doit apparaître dans l'OOS apparié.</div></div>
-<div class="panel" style="margin-top:12px"><div class="title"><h3>Auto-jugement & auto-amélioration</h3><span id="learnState" class="badge">WARM START</span></div><div class="learn"><div class="card"><div class="tiny">HIST OOS</div><b id="hist">0</b></div><div class="card"><div class="tiny">LIVE OOS</div><b id="live">0</b></div><div class="card"><div class="tiny">BRIER</div><b id="brier">—</b></div><div class="card"><div class="tiny">LOG LOSS</div><b id="logloss">—</b></div><div class="card"><div class="tiny">HIT RATE</div><b id="hit">—</b></div><div class="card"><div class="tiny">ROLL 50</div><b id="roll">—</b></div><div class="card"><div class="tiny">EN ATTENTE</div><b id="pend">0</b></div></div><div class="tiny" style="margin-top:8px">Le modèle est mis à jour uniquement après révélation du futur. Les poids et métriques sont persistants dans ce navigateur.</div></div>
-<div class="panel" style="margin-top:12px"><div class="title"><h3>Dérivés & flux</h3><span id="derSt" class="tiny">—</span></div><div class="stats"><div class="stat"><div class="tiny">OI HL</div><div id="oi" class="val">—</div></div><div class="stat"><div class="tiny">ΔOI</div><div id="doi" class="val">—</div></div><div class="stat"><div class="tiny">FUNDING</div><div id="fund" class="val">—</div></div><div class="stat"><div class="tiny">BASIS</div><div id="basis" class="val">—</div></div></div><div class="stats" style="margin-top:7px"><div class="stat"><div class="tiny">SPOT CVD</div><div id="spotCvd" class="val">—</div></div><div class="stat"><div class="tiny">PERP CVD</div><div id="perpCvd" class="val">—</div></div><div class="stat"><div class="tiny">LIQ 5m</div><div id="liq" class="val">—</div></div><div class="stat"><div class="tiny">ATR 1m</div><div id="atr" class="val">—</div></div></div></div>
-<div class="panel" style="margin-top:12px"><div class="title"><h3>L2 / microstructure</h3><span id="l2st" class="tiny">—</span></div><div id="book" class="book"></div></div>
-</aside>
-<section class="full"><div class="panel"><div class="title"><h3>Santé des connexions</h3><span id="healthText" class="tiny">—</span></div><div id="health" class="health"></div></div></section>
-<section class="full"><div class="panel"><div class="title"><h3>Journal OOS</h3><span class="tiny">aucune métrique inventée</span></div><table class="table"><thead><tr><th>Horizon</th><th>Hist OOS</th><th>Live OOS</th><th>Brier</th><th>Log loss</th><th>Hit</th><th>Δ PASR</th><th>État</th></tr></thead><tbody id="journal"></tbody></table></div></section>
-<section class="full"><div class="panel"><div class="title"><h3>Audit du moteur</h3><span class="tiny">état courant</span></div><div id="audit" class="method">—</div></div></section>
+  <div class="panel decision">
+    <div>
+      <div class="ey">Décision maintenant</div>
+      <div id="dir" class="dir neu">CHARGEMENT</div>
+      <div id="reg" class="tiny">—</div>
+    </div>
+    <div>
+      <div id="prob" class="prob">—</div>
+      <div class="tiny">dominance directionnelle · <span id="hz">5m</span></div>
+      <div class="bars"><i id="bL"></i><i id="bN"></i><i id="bS"></i></div>
+      <div class="tiny" style="display:flex;justify-content:space-between">
+        <span>LONG <b id="pL">—</b></span><span>NEUTRAL <b id="pN">—</b></span><span>SHORT <b id="pS">—</b></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="title"><h3>ORDRE À PLACER</h3><span id="ord" class="badge">—</span></div>
+    <div class="order">
+      <div class="box"><div class="smallcaps">Action</div><div id="act" class="big">—</div></div>
+      <div class="box"><div class="smallcaps">Entrée</div><div id="entry" class="big">—</div></div>
+      <div class="box"><div class="smallcaps">SL</div><div id="sl" class="big">—</div></div>
+      <div class="box"><div class="smallcaps">TP</div><div id="tp" class="big">—</div></div>
+      <div class="box"><div class="smallcaps">R:R</div><div id="rr" class="big">—</div></div>
+      <div class="box"><div class="smallcaps">Taille</div><div id="size" class="big">—</div></div>
+    </div>
+    <div id="whyOrder" class="note" style="margin-top:9px">—</div>
+  </div>
 </div>
-<div class="tiny" style="padding:12px 2px">Hyperliquid public WS/Info API + Binance Futures public market data. Les connexions sont gérées par le navigateur dans deux sockets groupés, avec reconnexion, heartbeat et resynchronisation REST. Aucune clé, aucun compte, aucun ordre réel.</div>
+
+<div class="panel chart" style="margin-top:12px">
+  <div class="title"><h3>Prix · 1 minute</h3><span id="chartInfo" class="tiny">—</span></div>
+  <canvas id="chart"></canvas>
+</div>
+
+<div class="panel" style="margin-top:12px">
+  <div class="title"><h3>Pourquoi ce plan</h3><span id="dq" class="badge">DQ —</span></div>
+  <div id="why" class="matrix"></div>
+  <div id="invalidate" class="note" style="margin-top:9px">—</div>
+</div>
+</section>
+
+<aside>
+<div class="panel">
+  <div class="title"><h3>Evidence Matrix</h3><span id="score" class="badge">—</span></div>
+  <div id="matrix" class="matrix"></div>
+</div>
+
+<div class="panel" style="margin-top:12px">
+  <div class="title"><h3>PASR-C4 · apport incrémental</h3><span id="pasrState" class="badge">INCONCLUSIF</span></div>
+  <div class="learn">
+    <div class="card"><div class="tiny">C4</div><b id="c4">—</b></div>
+    <div class="card"><div class="tiny">POIDS</div><b id="pasrW">—</b></div>
+    <div class="card"><div class="tiny">Δ BRIER</div><b id="deltaB">—</b></div>
+    <div class="card"><div class="tiny">OOS APPARIÉ</div><b id="pasrN">0</b></div>
+    <div class="card"><div class="tiny">VERDICT</div><b id="pasrV">INCONCLUSIF</b></div>
+    <div class="card"><div class="tiny">BUCKETS</div><b id="bucketN">0</b></div>
+    <div class="card"><div class="tiny">BASE / FULL</div><b>APPARIÉ</b></div>
+  </div>
+  <div class="tiny" style="margin-top:8px">Le verdict n'est affiché que sur les mêmes timestamps, avec la même cible future. Avant 100 OOS appariés, il reste INCONCLUSIF.</div>
+</div>
+
+<div class="panel" style="margin-top:12px">
+  <div class="title"><h3>Auto-jugement & auto-amélioration</h3><span id="learnState" class="badge">PRETRAIN</span></div>
+  <div class="learn">
+    <div class="card"><div class="tiny">PRETRAIN</div><b id="hist">0</b></div>
+    <div class="card"><div class="tiny">LIVE OOS</div><b id="live">0</b></div>
+    <div class="card"><div class="tiny">BRIER</div><b id="brier">—</b></div>
+    <div class="card"><div class="tiny">LOG LOSS</div><b id="logloss">—</b></div>
+    <div class="card"><div class="tiny">HIT RATE</div><b id="hit">—</b></div>
+    <div class="card"><div class="tiny">ROLL 50</div><b id="roll">—</b></div>
+    <div class="card"><div class="tiny">EN ATTENTE</div><b id="pend">0</b></div>
+  </div>
+  <div id="learningNote" class="tiny" style="margin-top:8px">PRETRAIN = transfert d'apprentissage prix. LIVE OOS = seules prévisions réellement gelées puis résolues. L'apprentissage live est persistant dans ce navigateur.</div>
+</div>
+
+<div class="panel" style="margin-top:12px">
+  <div class="title"><h3>Dérivés & flux</h3><span id="derSt" class="tiny">—</span></div>
+  <div class="stats">
+    <div class="stat"><div class="tiny">OI HL</div><div id="oi" class="val">—</div></div>
+    <div class="stat"><div class="tiny">ΔOI 5m</div><div id="doi" class="val">—</div></div>
+    <div class="stat"><div class="tiny">FUNDING</div><div id="fund" class="val">—</div></div>
+    <div class="stat"><div class="tiny">BASIS</div><div id="basis" class="val">—</div></div>
+  </div>
+  <div class="stats" style="margin-top:7px">
+    <div class="stat"><div class="tiny">SPOT FLOW</div><div id="spotCvd" class="val">—</div></div>
+    <div class="stat"><div class="tiny">PERP FLOW</div><div id="perpCvd" class="val">—</div></div>
+    <div class="stat"><div class="tiny">LIQ 5m</div><div id="liq" class="val">—</div></div>
+    <div class="stat"><div class="tiny">ATR 1m</div><div id="atr" class="val">—</div></div>
+  </div>
+</div>
+
+<div class="panel" style="margin-top:12px">
+  <div class="title"><h3>L2 / microstructure</h3><span id="l2st" class="tiny">—</span></div>
+  <div id="book" class="book"></div>
+</div>
+</aside>
+
+<section class="full">
+<div class="panel">
+  <div class="title"><h3>État du moteur</h3><span id="modeBadge" class="badge">LIVE</span></div>
+  <div class="kpi">
+    <div class="kbox"><div class="tiny">PRIX HL</div><b id="kPrice">—</b></div>
+    <div class="kbox"><div class="tiny">DATA QUALITY</div><b id="kDQ">—</b></div>
+    <div class="kbox"><div class="tiny">MIX BASE→FULL</div><b id="kMix">—</b></div>
+    <div class="kbox"><div class="tiny">FRAÎCHEUR</div><b id="kFresh">—</b></div>
+    <div class="kbox"><div class="tiny">CIBLE</div><b id="kTarget">—</b></div>
+  </div>
+</div>
+</section>
+
+<section class="full">
+<div class="panel">
+  <div class="title"><h3>Santé des connexions</h3><span id="healthText" class="tiny">—</span></div>
+  <div id="health" class="health"></div>
+</div>
+</section>
+
+<section class="full">
+<div class="panel">
+  <div class="title"><h3>Journal OOS</h3><span class="tiny">PRETRAIN séparé du LIVE OOS · aucune métrique inventée</span></div>
+  <table class="table">
+    <thead><tr><th>Horizon</th><th>Pretrain</th><th>Live OOS</th><th>Brier</th><th>Log loss</th><th>Hit</th><th>Δ PASR</th><th>État</th></tr></thead>
+    <tbody id="journal"></tbody>
+  </table>
+</div>
+</section>
+
+<section class="full">
+<div class="panel">
+  <div class="title"><h3>Audit du moteur</h3><span class="tiny">règles et limitations actuelles</span></div>
+  <div id="audit" class="tiny">—</div>
+</div>
+</section>
+
+<div class="tiny" style="padding:12px 2px">
+  Hyperliquid public WS/Info API + Binance public market data. Aucun compte, aucune clé, aucun ordre réel.
+  Le warm-start public utilise l'historique de bougies pour pré-entraîner le sous-espace prix; les features L2 historiques complètes nécessitent les archives Hyperliquid et ne sont donc jamais simulées comme si elles existaient.
+</div>
 </main>
+
 <script>
 'use strict';
-const $=id=>document.getElementById(id),HLWS='wss://api.hyperliquid.xyz/ws',HLAPI='https://api.hyperliquid.xyz/info',BNWS='wss://fstream.binance.com/stream',BNAPI='https://fapi.binance.com';
-const H=[5,15,60,240],ST='cde_public_learning_v10',now=()=>Date.now(),cl=(x,a,b)=>Math.max(a,Math.min(b,x)),pct=x=>Number.isFinite(x)?(100*x).toFixed(1)+'%':'—',num=(x,d=2)=>Number.isFinite(x)?x.toLocaleString('fr-FR',{maximumFractionDigits:d}):'—';
-let DB=(()=>{try{return JSON.parse(localStorage.getItem(ST)||'{}')}catch{return{}}})(); DB.models??={};DB.pending??={};DB.resolved??={};DB.hist??={};DB.tpgrid??={};
-const S={coin:'BTC',h:15,capital:1000,risk:.5,hl:{price:NaN,book:null,oi:NaN,funding:NaN,candles:[],trades:[]},bn:{price:NaN,oi:NaN,funding:NaN,spot:[],perp:[],liq:[]},feed:{HL_WS:'INIT',HL_L2:'INIT',HL_TRADES:'INIT',HL_CANDLE:'INIT',HL_CTX:'INIT',BN_WS:'INIT',BN_REST:'INIT'},ws:{hl:null,bn:null},lastTick:0,lastRest:0,lastForecast:0};
-function save(){localStorage.setItem(ST,JSON.stringify(DB))}
-function newM(){return{w:Array.from({length:3},()=>Array(11).fill(0)),b:[0,0,0],seen:0,brier:[],ll:[],hit:0,temp:1}}
-function mdl(h,k){DB.models[h]??={base:newM(),full:newM()};return DB.models[h][k]}
-function sm(z){const m=Math.max(...z),e=z.map(v=>Math.exp(cl(v-m,-30,30))),s=e.reduce((a,b)=>a+b,0);return e.map(v=>v/s)}
-function ema(a,n){if(!a.length)return NaN;let e=a[0],k=2/(n+1);for(let i=1;i<a.length;i++)e=a[i]*k+e*(1-k);return e}
-function ret(a,n){return a.length>n?a.at(-1)/a.at(-1-n)-1:NaN}
-function atr(a,n=14){if(a.length<n+1)return NaN;let s=0;for(let i=a.length-n;i<a.length;i++){let p=a[i-1],q=a[i];s+=Math.max(q.h-q.l,Math.abs(q.h-p.c),Math.abs(q.l-p.c))}return s/n}
-function depth(b){if(!b?.levels?.[0]?.length||!b?.levels?.[1]?.length)return{};let B=b.levels[0].slice(0,10),A=b.levels[1].slice(0,10),bs=B.reduce((s,x)=>s+ +x.sz,0),as=A.reduce((s,x)=>s+ +x.sz,0),bid=+B[0].px,ask=+A[0].px,mid=(bid+ask)/2,micro=(ask*bs+bid*as)/(bs+as||1);return{bid,ask,bs,as,imb:(bs-as)/(bs+as||1),microBias:(micro-mid)/mid,spread:(ask-bid)/mid}}
-function cvd(a){return a.length?a.slice(-800).reduce((s,x)=>s+(x.side==='B'?x.sz:-x.sz),0):NaN}
-function flowRatio(a){if(!a.length)return NaN;const z=a.slice(-800),buy=z.reduce((s,x)=>s+(x.side==='B'?x.sz:0),0),sell=z.reduce((s,x)=>s+(x.side==='S'?x.sz:0),0);return (buy-sell)/(buy+sell||1)}
-function buckets(a){const m=new Map();for(const q of a.slice(-2600)){const k=Math.floor(q.time/1000)*1000,v=m.get(k)||[0,0];q.side==='B'?v[0]+=q.sz:v[1]+=q.sz;m.set(k,v)}return[...m.entries()].sort((a,b)=>a[0]-b[0]).map(([t,[b,s]])=>({t,x:(b-s)/(b+s||1)}))}
-function pasr(){const z=buckets(S.hl.trades).map(q=>q.x);if(z.length<48)return{v:NaN,n:z.length};const m=z.reduce((a,b)=>a+b,0)/z.length,y=z.map(q=>q-m),c=[];for(let i=0;i+3<y.length;i+=4)c.push(y[i]*y[i+1]*y[i+2]*y[i+3]);const scale=Math.pow(Math.sqrt(y.reduce((s,q)=>s+q*q,0)/y.length)||1,4);return{v:cl((c.reduce((a,b)=>a+b,0)/c.length)/(scale||1),-3,3),n:z.length}}
-function feats(){const c=S.hl.candles,clo=c.map(q=>q.c),d=depth(S.hl.book),pc=pasr(),hlcvd=cvd(S.hl.trades),scvd=cvd(S.bn.spot),pcvd=cvd(S.bn.perp),r5=ret(clo,5),r15=ret(clo,15),r60=ret(clo,60),e=ema(clo.slice(-180),9)/ema(clo.slice(-180),21)-1;return{r5,r15,r60,ema:e,l2:d.imb,flow:flowRatio(S.hl.trades),absorption:Number.isFinite(flowRatio(S.hl.trades))&&Number.isFinite(r5)?cl(-flowRatio(S.hl.trades)*r5*120,-2,2):NaN,funding:Number.isFinite(S.hl.funding)?-S.hl.funding*3500:NaN,basis:Number.isFinite(S.hl.price)&&Number.isFinite(S.bn.price)?(S.hl.price/S.bn.price-1)*450:NaN,spotFlow:flowRatio(S.bn.spot),perpFlow:flowRatio(S.bn.perp),pasr:pc.v,pasrN:pc.n,atr:atr(c.slice(-120)),rv:Number.isFinite(r60)?Math.abs(r60):NaN,depth:d}}
-function vec(f,full){return[f.r5*900,f.r15*370,f.r60*120,(f.ema||0)*100,(f.l2||0)*1.4,(f.flow||0),f.absorption||0,f.funding||0,f.basis||0,(f.spotFlow||0)-(f.perpFlow||0)].concat(full?[f.pasr||0]:[]).map(x=>Number.isFinite(x)?cl(x,-3,3):0)}
-function pred(h,f,k){const m=mdl(String(h),k),v=vec(f,k==='full'),z=m.b.slice();for(let i=0;i<3;i++){for(let j=0;j<v.length;j++)z[i]+=(m.w[i][j]||0)*v[j]}return{p:sm(z.map(x=>x/(m.temp||1))),v,m}}
-function combo(h,f){const a=pred(h,f,'full'),b=pred(h,f,'base'),m=a.m,mix=m.seen<30?.08:cl(Math.abs(m.w[2]?.[10]||0)/.8,.05,1),p=a.p.map((x,i)=>b.p[i]+(x-b.p[i])*mix),s=p.reduce((a,b)=>a+b,0);return{full:a,base:b,p:p.map(x=>x/s),mix}}
-function qscore(f){const avail=[S.hl.price,S.bn.price,S.hl.oi,S.hl.funding,f.r5,f.r15,f.r60,f.l2,f.flow,f.basis].filter(Number.isFinite).length;return Math.round(cl(38+avail*6+(S.feed.HL_WS==='OK'?7:0)+(S.feed.BN_WS==='OK'?7:0),0,100))}
-function grid(h){DB.tpgrid[h]??=Array.from({length:4},(_,i)=>.6+i*.2).flatMap(sl=>[.75,1,1.25,1.5,2,2.5,3].map(tp=>({sl,tp,n:0,ev:0})));return DB.tpgrid[h]}
-function bestPair(h){const g=grid(h).filter(x=>x.n>=10);return(g.length?g:grid(h)).sort((a,b)=>b.ev-a.ev)[0]}
-function plan(h,f,p){const q=qscore(f),dom=Math.max(p.p[0],p.p[2]),dir=p.p[2]>=p.p[0]?'LONG':'SHORT',d=f.depth||{},entry=dir==='LONG'?d.ask:d.bid,a=Number.isFinite(f.atr)?f.atr:statePrice()*0.0025,pair=bestPair(h),riskDist=a*pair.sl,riskCash=S.capital*S.risk/100,sz=riskDist>0?riskCash/riskDist:NaN,sl=dir==='LONG'?entry-riskDist:entry+riskDist,tp=dir==='LONG'?entry+a*pair.tp:entry-a*pair.tp,rr=pair.tp/pair.sl,ev=dom*pair.tp-(1-dom)*pair.sl-(entry?entry*.0003/a:0),no=!Number.isFinite(entry)||!Number.isFinite(a)||q<70||dom<.60||ev<=0||!Number.isFinite(f.l2);return{direction:no?'NO TRADE':dir,entry:no?NaN:entry,sl:no?NaN:sl,tp:no?NaN:tp,rr:no?NaN:rr,size:no?NaN:sz,ev:no?NaN:ev,pair,q,reason:no?'Portail fermé : qualité, probabilité ou espérance nette insuffisante.':'Portail ouvert : signal directionnel + microstructure + espérance nette.'}}
-function statePrice(){return S.hl.price}
-function record(h,f,p,pl){const k=S.coin+'_'+h;DB.pending[k]??=[];DB.pending[k].push({ts:now(),h,coin:S.coin,entry:pl.entry,direction:pl.direction,pBase:p.base.p,pFull:p.full.p,features:f,plan:pl});DB.pending[k]=DB.pending[k].filter(x=>now()-x.ts<7*86400000).slice(-300);save()}
-function update(m,target,p,v){const lr=.035/(1+m.seen*.001);for(let k=0;k<3;k++){const e=(target===k?1:0)-p[k];m.b[k]=cl(m.b[k]+lr*e,-5,5);for(let j=0;j<v.length;j++)m.w[k][j]=cl(m.w[k][j]+lr*e*v[j],-2,2)}m.seen++}
-function resolve(){for(const h of H){const k=S.coin+'_'+h,a=DB.pending[k]||[],keep=[];for(const p of a){const end=p.ts+h*60000;if(now()<end-1500){keep.push(p);continue}const bars=S.hl.candles.filter(q=>q.t>=p.ts&&q.t<=end+60000);if(bars.length<Math.max(4,Math.floor(h*.6))){keep.push(p);continue}const r=bars.at(-1).c/p.entry-1,thr=Math.max(.0004,Math.min(.01,(p.features.atr||p.entry*.0025)/p.entry*.35)),target=r>thr?2:r<-thr?0:1,base=mdl(h,'base'),full=mdl(h,'full');for(const [m,pr,v] of [[base,p.pBase,vec(p.features,false)],[full,p.pFull,vec(p.features,true)]]){m.brier??=[];m.ll??=[];const br=pr.reduce((s,x,i)=>s+(x-(target===i?1:0))**2,0)/3,ll=-Math.log(cl(pr[target],1e-6,1));m.brier.push(br);m.ll.push(ll);if(pr.indexOf(Math.max(...pr))===target)m.hit++;if(m.brier.length>500)m.brier.shift();if(m.ll.length>500)m.ll.shift();update(m,target,pr,v)}learnGrid(h,p,bars);(DB.resolved[k]??=[]).push({ts:p.ts,target,pb:p.pBase,pf:p.pFull});DB.resolved[k]=DB.resolved[k].slice(-500)}DB.pending[k]=keep}save()}
-function learnGrid(h,p,bars){const a=DB.tpgrid[h]||[],entry=p.entry;if(!Number.isFinite(entry)||!p.features.atr)return;for(const g of a){const sd=p.features.atr*g.sl,td=p.features.atr*g.tp,dir=p.direction==='SHORT'?-1:1;let out=null;for(const q of bars){const hitSL=dir>0?q.l<=entry-sd:q.h>=entry+sd,hitTP=dir>0?q.h>=entry+td:q.l<=entry-td;if(hitSL){out=-g.sl;break}if(hitTP){out=g.tp;break}}if(out===null)out=dir>0?(bars.at(-1).c-entry)/p.features.atr:(entry-bars.at(-1).c)/p.features.atr;g.n++;g.ev=((g.ev*(g.n-1))+out)/g.n}}
-async function hl(body){const r=await fetch(HLAPI,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});if(!r.ok)throw Error('HL '+r.status);return r.json()}
-async function restSync(){const t=now();try{const [c,m,oi,pr]=await Promise.all([hl({type:'candleSnapshot',req:{coin:S.coin,interval:'1m',startTime:t-3*86400000,endTime:t}}),hl({type:'metaAndAssetCtxs'}),fetch(BNAPI+'/fapi/v1/openInterest?symbol='+S.coin+'USDT').then(r=>r.json()),fetch(BNAPI+'/fapi/v1/premiumIndex?symbol='+S.coin+'USDT').then(r=>r.json())]);S.hl.candles=(c||[]).map(q=>({t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v}));const i=m?.[0]?.universe?.findIndex(q=>q.name===S.coin);if(i>=0){S.hl.oi=+m[1][i].openInterest;S.hl.funding=+m[1][i].funding}S.bn.oi=+oi.openInterest;S.bn.funding=+pr.lastFundingRate;S.feed.HL_CANDLE='OK';S.feed.HL_CTX='OK';S.feed.BN_REST='OK';S.lastRest=t}catch(e){S.feed.BN_REST='STALE';}}
-function reconnectHL(){let attempt=0,timer=null;const go=()=>{attempt++;S.feed.HL_WS='RECONNECTING';let ws;try{ws=new WebSocket(HLWS);S.ws.hl=ws;ws.onopen=()=>{attempt=0;S.feed.HL_WS='OK';for(const sub of [{type:'allMids'},{type:'l2Book',coin:S.coin},{type:'trades',coin:S.coin},{type:'candle',coin:S.coin,interval:'1m'},{type:'activeAssetCtx',coin:S.coin}])ws.send(JSON.stringify({method:'subscribe',subscription:sub}));clearInterval(timer);timer=setInterval(()=>{if(ws.readyState===1)ws.send(JSON.stringify({method:'ping'}))},20000)};ws.onmessage=e=>{try{const m=JSON.parse(e.data);S.lastTick=now();if(m.channel==='allMids'&&m.data?.mids?.[S.coin]!=null)S.hl.price=+m.data.mids[S.coin];else if(m.channel==='l2Book'){S.hl.book=m.data;S.feed.HL_L2='OK'}else if(m.channel==='trades'){for(const q of(Array.isArray(m.data)?m.data:[m.data]))if(q?.side&&q?.sz!=null)S.hl.trades.push({time:+q.time||now(),side:q.side==='B'?'B':'S',sz:+q.sz});S.hl.trades=S.hl.trades.slice(-7000);S.feed.HL_TRADES='OK'}else if(m.channel==='candle'){const q=m.data;S.hl.candles.push({t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v});S.hl.candles=[...new Map(S.hl.candles.map(x=>[x.t,x])).values()].sort((a,b)=>a.t-b.t).slice(-5000);S.feed.HL_CANDLE='OK'}else if(m.channel==='activeAssetCtx'){const q=m.data?.ctx||m.data;if(q){if(q.openInterest!=null)S.hl.oi=+q.openInterest;if(q.funding!=null)S.hl.funding=+q.funding;S.feed.HL_CTX='OK'}}}catch{}};ws.onclose=()=>{clearInterval(timer);S.feed.HL_WS='RECONNECTING';setTimeout(go,cl(1000*2**Math.min(attempt,6),1000,30000)+Math.random()*1000)};ws.onerror=()=>{try{ws.close()}catch{}}}catch{setTimeout(go,3000)}};go()}
-function reconnectBN(){const base=S.coin.toLowerCase()+'usdt';let attempt=0,lastConnect=0;const go=()=>{attempt++;S.feed.BN_WS='RECONNECTING';let ws;try{ws=new WebSocket(BNWS+'?streams='+base+'@aggTrade/'+base+'@markPrice@1s/'+base+'@forceOrder/'+base+'@kline_1m');S.ws.bn=ws;lastConnect=now();ws.onopen=()=>{attempt=0;S.feed.BN_WS='OK'};ws.onmessage=e=>{try{const m=JSON.parse(e.data),d=m.data,s=m.stream||'';S.lastTick=now();if(s.includes('@aggTrade'))S.bn.perp.push({time:d.T||d.E,side:d.m?'S':'B',sz:+d.q});else if(s.includes('@markPrice')){S.bn.price=+d.p;S.bn.funding=+d.r}else if(s.includes('@forceOrder'))S.bn.liq.push(Math.abs(+(d.o?.q||0)))}catch{}};ws.onclose=()=>{S.feed.BN_WS='RECONNECTING';setTimeout(go,cl(1200*2**Math.min(attempt,6),1200,30000)+Math.random()*1000)};ws.onerror=()=>{try{ws.close()}catch{}};setTimeout(()=>{if(ws.readyState===1&&now()-lastConnect>22*3600000)try{ws.close()}catch{}},22*3600000)}catch{setTimeout(go,3000)}};go()}
-function restSpot(){const sym=S.coin+'USDT';fetch(BNAPI+'/fapi/v1/ticker/price?symbol='+sym).catch(()=>{});fetch('https://api.binance.com/api/v3/aggTrades?symbol='+sym+'&limit=1000').then(r=>r.ok?r.json():[]).then(a=>{for(const q of a)S.bn.spot.push({time:q.T||now(),side:q.m?'S':'B',sz:+q.q});S.bn.spot=S.bn.spot.slice(-7000)}).catch(()=>{})}
-async function warmStart(){for(const h of H){try{const end=now()-2*h*60000,start=end-5*86400000,b=await hl({type:'candleSnapshot',req:{coin:S.coin,interval:'1m',startTime:start,endTime:end}}),bars=(b||[]).map(q=>({t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v}));if(bars.length<400)continue;DB.hist[S.coin]??={};DB.hist[S.coin][h]??={n:0};if(DB.hist[S.coin][h].n>0)continue;const m=mdl(h,'base');for(let i=80;i<bars.length-h;i++){const c=bars.slice(0,i+1),clo=c.map(q=>q.c),f={r5:ret(clo,5),r15:ret(clo,15),r60:ret(clo,60),ema:ema(clo.slice(-180),9)/ema(clo.slice(-180),21)-1,l2:NaN,flow:NaN,absorption:NaN,funding:NaN,basis:NaN,spotFlow:NaN,perpFlow:NaN,pasr:NaN,pasrN:0,atr:atr(c.slice(-120))},fut=bars[i+h].c/bars[i].c-1,thr=Math.max(.0004,Math.min(.01,(f.atr||bars[i].c*.0025)/bars[i].c*.35)),target=labelFromReturn(fut,thr),v=vec(f,false),z=m.b.slice();for(let k=0;k<3;k++)for(let j=0;j<v.length;j++)z[k]+=m.w[k][j]*v[j];const pr=sm(z),br=pr.reduce((s,x,k)=>s+(x-(target===k?1:0))**2,0)/3,ll=-Math.log(cl(pr[target],1e-6,1));DB.hist[S.coin][h].n++;DB.hist[S.coin][h].brier??=[];DB.hist[S.coin][h].ll??=[];DB.hist[S.coin][h].brier.push(br);DB.hist[S.coin][h].ll.push(ll);m.seen++;update(m,target,pr,v)}persist()}catch{}}}
-function labelFromReturn(r,t){return r>t?2:r<-t?0:1}
-function dashboard(){const f=feats(),p=combo(S.h,f),pl=plan(S.h,f,p),q=pl.q,dom=Math.max(p.p[0],p.p[2]);render(f,p,pl,q,dom)}
-function render(f,p,pl,q,dom){const dir=pl.direction;$('dir').textContent=dir;$('dir').className='dir '+(dir==='LONG'?'up':dir==='SHORT'?'down':'neu');$('prob').textContent=dir==='NO TRADE'?'—':(dom*100).toFixed(0)+'%';$('hz').textContent=S.h+'m';$('pL').textContent=pct(p.p[2]);$('pN').textContent=pct(p.p[1]);$('pS').textContent=pct(p.p[0]);$('bL').style.width=p.p[2]*100+'%';$('bN').style.width=p.p[1]*100+'%';$('bS').style.width=p.p[0]*100+'%';$('bL').style.background='var(--u)';$('bN').style.background='var(--n)';$('bS').style.background='var(--d)';$('reg').textContent='Régime '+(Math.abs(f.r15)>.003?'TREND':Math.abs(f.l2||0)>.4?'LIQUIDITÉ':'TRANSITION')+' · DQ '+q+'/100';$('dq').textContent='DQ '+q;$('score').textContent='P(L)-P(S) '+(p.p[2]-p.p[0]).toFixed(3);$('act').textContent=dir==='LONG'?'BUY':dir==='SHORT'?'SELL':'NO TRADE';$('ord').textContent=dir==='NO TRADE'?'ABSTAIN':'READY';$('entry').textContent=num(pl.entry);$('sl').textContent=num(pl.sl);$('tp').textContent=num(pl.tp);$('rr').textContent=Number.isFinite(pl.rr)?'1:'+pl.rr.toFixed(2):'—';$('size').textContent=Number.isFinite(pl.size)?pl.size.toFixed(4):'—';$('whyOrder').textContent=pl.reason;$('headline').textContent=dir==='NO TRADE'?'aucune position à prendre maintenant':'plan '+(dir==='LONG'?'acheteur':'vendeur')+' généré';const items=[['Structure',f.r15*370],['L2',f.l2],['Flow',f.flow],['Absorption',f.absorption],['Dérivés',f.funding],['Cross-venue',f.basis],['PASR',f.pasr]].filter(x=>Number.isFinite(x[1])).sort((a,b)=>Math.abs(b[1])-Math.abs(a[1]));$('why').innerHTML=items.slice(0,6).map(x=>'<div class="ev"><div class="evtop"><b>'+x[0]+'</b><span class="badge '+(x[1]>0?'up':'down')+'">'+(x[1]>0?'+':'')+x[1].toFixed(3)+'</span></div><div class="tiny">contribution quantitative</div></div>').join('');$('matrix').innerHTML=items.slice(0,6).map(x=>'<div class="ev"><div class="evtop"><b>'+x[0]+'</b><span class="badge '+(x[1]>0?'up':'down')+'">'+(x[1]>0?'+':'')+x[1].toFixed(3)+'</span></div><div class="tiny">'+(Math.abs(x[1])>.7?'extrême':Math.abs(x[1])>.3?'fort':'modéré')+'</div></div>').join('');$('invalidate').textContent='Ce qui ferait changer l’ordre : dominance < 60 %, DQ < 70, EV ≤ 0 ou perte du L2 primaire.';const d=f.depth||{};$('book').innerHTML='<div><div class="line"><span>Bid</span><b>'+num(d.bid)+'</b></div><div class="line"><span>Bid depth</span><b>'+num(d.bs,3)+'</b></div></div><div><div class="line"><span>Ask</span><b>'+num(d.ask)+'</b></div><div class="line"><span>Ask depth</span><b>'+num(d.as,3)+'</b></div></div><div class="full"><div class="line"><span>Imbalance</span><b>'+pct(d.imb)+'</b></div><div class="line"><span>Microprice bias</span><b>'+pct(d.microBias,2)+'</b></div><div class="line"><span>Spread</span><b>'+pct(d.spread,4)+'</b></div></div>';$('oi').textContent=num(S.hl.oi,0);$('doi').textContent=Number.isFinite(S.hl.oi)&&Number.isFinite(S.bn.oi)?pct(S.hl.oi/S.bn.oi-1):'—';$('fund').textContent=pct(S.hl.funding,4);$('basis').textContent=Number.isFinite(S.hl.price)&&Number.isFinite(S.bn.price)?((S.hl.price/S.bn.price-1)*10000).toFixed(1)+' bps':'—';$('spotCvd').textContent=num(cvd(S.bn.spot),2);$('perpCvd').textContent=num(cvd(S.bn.perp),2);$('liq').textContent=num(S.bn.liq.slice(-60).reduce((a,b)=>a+b,0),2);$('atr').textContent=num(f.atr,2);$('derSt').textContent=S.feed.BN_REST==='OK'?'live':'stale';$('l2st').textContent=S.feed.HL_L2==='OK'?'live':'degraded';const mf=mdl(S.h,'full'),mb=mdl(S.h,'base'),mm=metrics(mf),bm=metrics(mb),del=Number.isFinite(mm.b)&&Number.isFinite(bm.b)?bm.b-mm.b:NaN;$('c4').textContent=Number.isFinite(f.pasr)?f.pasr.toFixed(3):'—';$('pasrW').textContent=(mf.w[2]?.[10]||0).toFixed(3);$('deltaB').textContent=Number.isFinite(del)?(-del).toFixed(4):'—';$('pasrN').textContent=mm.n;$('pasrV').textContent=Number.isFinite(del)?del<-.002?'HELPING':del>.002?'HURTING':'INCONCLUSIVE':'WARMING';$('pasrState').textContent=$('pasrV').textContent;$('bucketN').textContent=f.pasrN;$('hist').textContent=DB.hist[S.coin]?.[S.h]?.n||0;$('live').textContent=mm.n;$('brier').textContent=Number.isFinite(mm.b)?mm.b.toFixed(4):'—';$('logloss').textContent=Number.isFinite(mm.ll)?mm.ll.toFixed(4):'—';$('hit').textContent=Number.isFinite(mm.hit)?pct(mm.hit):'—';$('roll').textContent=Number.isFinite(mm.roll)?mm.roll.toFixed(4):'—';$('pend').textContent=(DB.pending[S.coin+'_'+S.h]||[]).length;$('learnState').textContent=mm.n<30?'LEARNING':mm.n<120?'CALIBRATING':'ADAPTIVE';$('health').innerHTML=Object.entries(S.feed).map(([k,v])=>'<div class="src"><div class="tiny">'+k+'</div><b class="'+(v==='OK'?'ok':v==='STALE'?'warn':'bad')+'">'+v+'</b></div>').join('');$('healthText').textContent=S.coin+' · '+new Date().toLocaleTimeString('fr-FR')+' · last tick '+Math.max(0,Math.round((now()-S.lastTick)/1000))+'s';$('chartInfo').textContent='HL '+num(S.hl.price)+' · BN '+num(S.bn.price);$('audit').textContent='Flux primaires : '+S.feed.HL_WS+' / '+S.feed.HL_L2+' / '+S.feed.HL_TRADES+'. Binance : '+S.feed.BN_WS+'. Learning persistant : localStorage. Chaque prévision est gelée à t0 et résolue à son horizon.';journal();draw()}
-function metrics(m){if(!m.seen)return{n:0,b:NaN,ll:NaN,hit:NaN,roll:NaN};return{n:m.seen,b:m.brier.reduce((a,b)=>a+b,0)/m.brier.length,ll:m.ll.reduce((a,b)=>a+b,0)/m.ll.length,hit:m.hit/m.seen,roll:m.brier.slice(-50).reduce((a,b)=>a+b,0)/Math.min(50,m.brier.length)}}
-function journal(){let rows=H.map(h=>{let f=metrics(mdl(h,'full')),b=metrics(mdl(h,'base')),d=Number.isFinite(f.b)&&Number.isFinite(b.b)?b.b-f.b:NaN;return'<tr><td>'+h+'m</td><td>'+(DB.hist[S.coin]?.[h]?.n||0)+'</td><td>'+f.n+'</td><td>'+(Number.isFinite(f.b)?f.b.toFixed(4):'—')+'</td><td>'+(Number.isFinite(f.ll)?f.ll.toFixed(4):'—')+'</td><td>'+(Number.isFinite(f.hit)?pct(f.hit):'—')+'</td><td>'+(Number.isFinite(d)?d.toFixed(4):'—')+'</td><td>'+(f.n<30?'LEARNING':f.n<120?'CALIBRATING':'ADAPTIVE')+'</td></tr>'}).join('');$('journal').innerHTML=rows}
-function draw(){const a=S.hl.candles.slice(-180),c=$('chart'),x=c.getContext('2d'),r=c.getBoundingClientRect(),d=devicePixelRatio||1;c.width=r.width*d;c.height=r.height*d;x.scale(d,d);x.clearRect(0,0,r.width,r.height);if(a.length<2)return;const lo=Math.min(...a.map(q=>q.l)),hi=Math.max(...a.map(q=>q.h)),rg=hi-lo||1,X=i=>36+i/(a.length-1)*(r.width-48),Y=v=>12+(hi-v)/rg*(r.height-44);x.strokeStyle='#17303b';for(let i=0;i<5;i++){let y=12+i/4*(r.height-44);x.beginPath();x.moveTo(36,y);x.lineTo(r.width-12,y);x.stroke()}for(let i=0;i<a.length;i++){let q=a[i],cx=X(i),up=q.c>=q.o;x.strokeStyle=up?'#43d19d':'#ff7082';x.beginPath();x.moveTo(cx,Y(q.h));x.lineTo(cx,Y(q.l));x.stroke();x.fillStyle=x.strokeStyle;x.fillRect(cx-1.7,Y(Math.max(q.o,q.c)),3.4,Math.max(1,Y(Math.min(q.o,q.c))-Y(Math.max(q.o,q.c))))}}
-async function run(){S.coin=$('coin').value;S.h=+$('hor').value;S.capital=+$('capital').value||1000;S.risk=+$('risk').value||.5;await warmStart();reconnectHL();reconnectBN();await restSync();setInterval(async()=>{if(now()-S.lastRest>15000)await restSync();restSpot();resolve();dashboard()},5000);setInterval(()=>{if(now()-S.lastForecast>59000){for(const h of H){const f=feats(),p=combo(h,f),pl=plan(h,f,p);record(h,f,p,pl)}S.lastForecast=now()}},5000);dashboard()}
-$('coin').onchange=()=>location.reload();$('hor').onchange=()=>{S.h=+$('hor').value;dashboard()};$('capital').oninput=()=>S.capital=+$('capital').value||1000;$('risk').oninput=()=>S.risk=+$('risk').value||.5;$('refresh')?.addEventListener('click',restSync);$('relearn').onclick=async()=>{DB.hist={};H.forEach(h=>DB.models[h]=undefined);save();await warmStart();dashboard()};run();
-</script></body></html>
+
+var $=function(id){return document.getElementById(id)};
+var HLWS='wss://api.hyperliquid.xyz/ws', HLAPI='https://api.hyperliquid.xyz/info';
+var BNWS='wss://fstream.binance.com/stream', BNAPI='https://fapi.binance.com';
+var BN_SPOT='https://api.binance.com/api/v3/aggTrades';
+var H=[5,15,60,240], FEATS=['r1','r5','r15','r60','ema','l2','micro','flow','absorption','funding','basis','spotPerp','doi','liq','pasr'];
+var STORE='cde_v11_learning_v1';
+var now=function(){return Date.now()};
+var clamp=function(x,a,b){return Math.max(a,Math.min(b,x))};
+var finite=function(x){return Number.isFinite(x)};
+var pct=function(x,d){return finite(x)?(100*x).toFixed(d==null?1:d)+'%':'—'};
+var nfmt=function(x,d){return finite(x)?Number(x).toLocaleString('fr-FR',{maximumFractionDigits:d==null?2:d}):'—'};
+
+var DB=(function(){try{return JSON.parse(localStorage.getItem(STORE)||'{}')}catch(e){return{}}})();
+DB.models=DB.models||{}; DB.pending=DB.pending||{}; DB.obs=DB.obs||{}; DB.grid=DB.grid||{}; DB.pretrain=DB.pretrain||{}; DB.pasr=DB.pasr||{};
+var S={
+  coin:'BTC',h:5,capital:1000,risk:.5,lastForecast:0,lastRender:0,lastRest:0,
+  hl:{price:NaN,book:null,oi:NaN,funding:NaN,candles:[],trades:[],oiHist:[],lastPrice:0,lastBook:0,lastTrades:0,lastCtx:0},
+  bn:{price:NaN,oi:NaN,funding:NaN,spot:[],perp:[],liq:[],oiHist:[],lastMark:0,lastSpot:0,lastPerp:0,lastLiq:0,lastRest:0},
+  tape:[],feed:{HL_WS:'INIT',HL_L2:'INIT',HL_TRADES:'INIT',HL_CANDLE:'INIT',HL_CTX:'INIT',BN_WS:'INIT',BN_REST:'INIT',BN_SPOT:'INIT'}
+};
+
+function save(){try{localStorage.setItem(ST,JSON.stringify(DB))}catch(e){}}
+function newM(){return{w:Array.from({length:3},function(){return Array(30).fill(0)}),b:[0,0,0],seen:0,temp:1,obs:[]}}
+function model(h,k){var key=S.coin+'_'+h;if(!DB.models[key])DB.models[key]={base:newM(),full:newM()};return DB.models[key][k]}
+function sigmoid(z){var m=Math.max.apply(null,z),e=z.map(function(v){return Math.exp(clamp(v-m,-30,30))}),s=e.reduce(function(a,b){return a+b},0);return e.map(function(v){return v/s})}
+function ema(a,n){if(!a.length)return NaN;var e=a[0],k=2/(n+1);for(var i=1;i<a.length;i++)e=a[i]*k+e*(1-k);return e}
+function ret(a,n){return a.length>n?a[a.length-1]/a[a.length-1-n]-1:NaN}
+function atr(a,n){n=n||14;if(a.length<n+1)return NaN;var s=0;for(var i=a.length-n;i<a.length;i++){var p=a[i-1],q=a[i];s+=Math.max(q.h-q.l,Math.abs(q.h-p.c),Math.abs(q.l-p.c))}return s/n}
+function fresh(ts,maxAge){return ts>0&&(now()-ts)<=maxAge}
+function histFresh(ts,maxAge){return ts>0&&(Math.abs(now()-ts)<=maxAge)}
+function depth(book){
+  if(!book||!book.levels||!book.levels[0]||!book.levels[1])return{};
+  var B=book.levels[0].slice(0,10),A=book.levels[1].slice(0,10); if(!B.length||!A.length)return{};
+  var bs=0,as=0,wb=0,wa=0;
+  for(var i=0;i<B.length;i++){var bp=+B[i].px,s=+B[i].sz,d=Math.abs(bp-(+B[0].px))/(+B[0].px)+0.0005,wt=1/(1+d*80);bs+=s;wb+=s*wt}
+  for(var j=0;j<A.length;j++){var ap=+A[j].px,s2=+A[j].sz,d2=Math.abs(ap-(+A[0].px))/(+A[0].px)+0.0005,wt2=1/(1+d2*80);as+=s2;wa+=s2*wt2}
+  var bid=+B[0].px,ask=+A[0].px,mid=(bid+ask)/2,imb=(wb-wa)/(wb+wa||1),micro=(ask*wb+bid*wa)/(wb+wa||1);
+  return{bid:bid,ask:ask,bs:bs,as:as,imb:imb,microBias:(micro-mid)/(mid||1),spread:(ask-bid)/(mid||1)};
+}
+function flowRatio(a){
+  if(!a||!a.length)return NaN;
+  var z=a.slice(-800),buy=0,sell=0;
+  for(var i=0;i<z.length;i++){if(z[i].side==='B')buy+=z[i].sz;else if(z[i].side==='S')sell+=z[i].sz}
+  return (buy-sell)/(buy+sell||1);
+}
+function cvd(a){var r=flowRatio(a);return finite(r)?r:NaN}
+function liqRatio(a){
+  if(!a||!a.length)return NaN;
+  var z=a.filter(function(q){return q.time>now()-5*60000}),up=0,dn=0;
+  for(var i=0;i<z.length;i++){if(z[i].side==='SELL')dn+=z[i].notional;else up+=z[i].notional}
+  return (up-dn)/(up+dn||1);
+}
+function pasr(){
+  var a=S.hl.trades||[]; if(a.length<48)return{v:NaN,n:0};
+  var buckets={},z=a.slice(-4000);
+  for(var i=0;i<z.length;i++){var k=Math.floor(z[i].time/1000)*1000;if(!buckets[k])buckets[k]=[0,0];if(z[i].side==='B')buckets[k][0]+=z[i].sz;else buckets[k][1]+=z[i].sz}
+  var xs=Object.keys(buckets).sort(function(a,b){return +a-+b}).map(function(k){var q=buckets[k];return(q[0]-q[1])/(q[0]+q[1]||1)});
+  if(xs.length<48)return{v:NaN,n:xs.length};
+  var mu=xs.reduce(function(a,b){return a+b},0)/xs.length,y=xs.map(function(q){return q-mu}),sum4=0,n=0;
+  for(var j=0;j+3<y.length;j+=4){sum4+=y[j]*y[j+1]*y[j+2]*y[j+3];n++}
+  var rms=Math.sqrt(y.reduce(function(s,q){return s+q*q},0)/y.length)||1;
+  return{v:clamp((sum4/(n||1))/Math.pow(rms,4),-3,3),n:xs.length};
+}
+function doi5(){
+  var z=S.hl.oiHist,cut=now()-5*60000;if(!z.length||!finite(S.hl.oi))return NaN;
+  var old=z.filter(function(q){return q.t<=cut}).slice(-1)[0];return old?S.hl.oi/old.v-1:NaN;
+}
+function feats(){
+  var c=S.hl.candles,clo=c.map(function(q){return q.c}),d=depth(S.hl.book),p=pasr(),pr=fresh(S.hl.lastTrades,10000),l2=fresh(S.hl.lastBook,5000);
+  var r1=ret(clo,1),r5=ret(clo,5),r15=ret(clo,15),r60=ret(clo,60),em=ema(clo.slice(-180),9)/ema(clo.slice(-180),21)-1;
+  var fr=pr?flowRatio(S.hl.trades):NaN;
+  var abs=(finite(fr)&&finite(r5))?clamp(-fr*r5*100,-2,2):NaN;
+  var funding=fresh(S.hl.lastCtx,30000)&&finite(S.hl.funding)?-S.hl.funding*3500:NaN;
+  var basis=(fresh(S.hl.lastPrice,5000)&&fresh(S.bn.lastMark,5000)&&finite(S.hl.price)&&finite(S.bn.price))?(S.hl.price/S.bn.price-1)*450:NaN;
+  var sf=fresh(S.bn.lastSpot,15000)?flowRatio(S.bn.spot):NaN;
+  var pf=fresh(S.bn.lastPerp,10000)?flowRatio(S.bn.perp):NaN;
+  var lp=fresh(S.bn.lastLiq,15000)?liqRatio(S.bn.liq):NaN;
+  var micro=l2&&finite(d.microBias)?clamp(d.microBias*900,-3,3):NaN;
+  return{r1:r1,r5:r5,r15:r15,r60:r60,ema:em,l2:l2&&finite(d.imb)?d.imb:NaN,micro:micro,flow:fr,absorption:abs,funding:funding,basis:basis,spotPerp:(finite(sf)&&finite(pf)?sf-pf:NaN),doi:doi5(),liq:lp,pasr:p.v,pasrN:p.n,atr:atr(c.slice(-120)),depth:d};
+}
+function scaleFeature(k,v){
+  if(!finite(v))return NaN;
+  var s={r1:1500,r5:700,r15:350,r60:150,ema:120,l2:2,micro:1.4,flow:1.5,absorption:1,funding:1,basis:1,spotPerp:1.2,doi:2,liq:1,pasr:1};
+  return clamp(v*(s[k]||1),-3,3);
+}
+function vec(f,full){
+  var v=[],enabled=full?FEATS.length:5;
+  for(var i=0;i<FEATS.length;i++){
+    var k=FEATS[i],x=i<enabled?scaleFeature(k,f[k]):NaN,m=finite(x)?1:0;
+    v.push(finite(x)?x:0);v.push(m);
+  }
+  return v;
+}
+function pred(h,f,k){
+  var m=model(h,k),v=vec(f,k==='full'),z=m.b.slice();
+  for(var i=0;i<3;i++)for(var j=0;j<v.length;j++)z[i]+=(m.w[i][j]||0)*v[j];
+  return{p:sigmoid(z.map(function(x){return x/(m.temp||1)})),v:v,m:m};
+}
+function mixed(h,f){
+  var base=pred(h,f,'base'),full=pred(h,f,'full'),fs=full.m.seen,alpha=clamp(fs/300,0,1);
+  var p=base.p.map(function(x,i){return x*(1-alpha)+full.p[i]*alpha}),s=p.reduce(function(a,b){return a+b},0);
+  return{base:base,full:full,alpha:alpha,p:p.map(function(x){return x/s})};
+}
+function dataQuality(f){
+  var checks=[
+    fresh(S.hl.lastPrice,5000),fresh(S.hl.lastBook,5000),fresh(S.hl.lastTrades,10000),
+    fresh(S.hl.lastCtx,30000),fresh(S.bn.lastMark,5000),fresh(S.bn.lastSpot,15000),fresh(S.bn.lastPerp,10000),
+    finite(f.r5),finite(f.r15),finite(f.r60),finite(f.l2),finite(f.flow),finite(f.basis)
+  ];
+  var good=checks.filter(Boolean).length;
+  var q=Math.round(clamp(42+good*4.6+(fresh(S.hl.lastBook,5000)?5:0)+(fresh(S.bn.lastMark,5000)?5:0),0,100));
+  return q;
+}
+function grid(h,dir){
+  var key=S.coin+'_'+h+'_'+dir;
+  if(!DB.grid[key])DB.grid[key]=[0.55,0.7,0.9,1.1,1.35].flatMap(function(sl){return[0.75,1,1.25,1.5,1.75,2,2.5,3].map(function(tp){return{sl:sl,tp:tp,n:0,ev:0}})});
+  return DB.grid[key];
+}
+function bestPair(h,dir){
+  var g=grid(h,dir),usable=g.filter(function(x){return x.n>=15});
+  return (usable.length?usable:g).slice().sort(function(a,b){return b.ev-a.ev})[0];
+}
+function orderPlan(h,f,m){
+  var pL=m.p[2],pN=m.p[1],pS=m.p[0],dir=pL>=pS?'LONG':'SHORT',pd=dir==='LONG'?pL:pS,po=dir==='LONG'?pS:pL;
+  var d=f.depth||{},entry=dir==='LONG'?d.ask:d.bid,a=finite(f.atr)?f.atr:(finite(S.hl.price)?S.hl.price*.0025:NaN),q=dataQuality(f),pair=bestPair(h,dir),riskCash=S.capital*S.risk/100;
+  var riskDist=a*pair.sl,sz=riskDist>0?riskCash/riskDist:NaN,sl=dir==='LONG'?entry-riskDist:entry+riskDist,tp=dir==='LONG'?entry+a*pair.tp:entry-a*pair.tp,rr=pair.tp/pair.sl;
+  var costR=entry&&a?entry*0.00035/a:0;
+  var ev=(pd*pair.tp)-(pN*0)-(po*pair.sl)-costR;
+  var gate=!finite(entry)||!finite(a)||q<75||pd<.55||(pd-po)<.08||!finite(f.l2)||!finite(ev)||ev<=0;
+  return{direction:gate?'NO TRADE':dir,candidate:dir,pd:pd,po:po,q:q,entry:gate?NaN:entry,sl:gate?NaN:sl,tp:gate?NaN:tp,rr:gate?NaN:rr,size:gate?NaN:sz,ev:gate?NaN:ev,pair:pair,reason:gate?'Portail fermé : qualité, dominance, différentiel ou espérance insuffisant.':'Portail ouvert : direction + microstructure + espérance nette.'};
+}
+function labelFromReturn(r,thr){return r>thr?2:r<-thr?0:1}
+function brier(p,target){return p.reduce(function(s,x,i){var y=i===target?1:0;return s+(x-y)*(x-y)},0)}
+function logloss(p,target){return -Math.log(clamp(p[target],1e-9,1))}
+function metricArr(a){if(!a.length)return NaN;return a.reduce(function(x,y){return x+y},0)/a.length}
+function calibrate(m){
+  if(m.obs.length<60)return;
+  var recent=m.obs.slice(-240),bestT=m.temp,best=Infinity;
+  for(var t=.5;t<=2.51;t+=.05){var ll=0;for(var i=0;i<recent.length;i++){var pr=sigmoid(recent[i].logits.map(function(x){return x/t}));ll+=logloss(pr,recent[i].target)}ll/=recent.length;if(ll<best){best=ll;bestT=t}}
+  m.temp=bestT;
+}
+function update(m,target,p,v){
+  var lr=.035/(1+m.seen*.0015);
+  for(var k=0;k<3;k++){var e=(target===k?1:0)-p[k];m.b[k]=clamp(m.b[k]+lr*e,-5,5);for(var j=0;j<v.length;j++)m.w[k][j]=clamp(m.w[k][j]+lr*e*v[j],-2,2)}
+  m.seen++;
+}
+function forecastLogits(m,v){
+  var z=m.b.slice();for(var i=0;i<3;i++)for(var j=0;j<v.length;j++)z[i]+=(m.w[i][j]||0)*v[j];return z;
+}
+function recordForecast(h,f,m,pl){
+  var key=S.coin+'_'+h;
+  DB.pending[key]=DB.pending[key]||[];
+  if(DB.pending[key].some(function(x){return Math.abs(x.ts-now())<15000}))return;
+  var p0=S.hl.price;if(!finite(p0))return;
+  DB.pending[key].push({ts:now(),h:h,coin:S.coin,p0:p0,targetThr:clamp((f.atr||p0*.0025)/p0*.45,.0004,.01),pBase:m.base.p.slice(),pFull:m.full.p.slice(),vBase:m.base.v.slice(),vFull:m.full.v.slice(),candidate:pl.candidate,entry:finite(pl.entry)?pl.entry:p0,dir:pl.candidate,atr:f.atr});
+  DB.pending[key]=DB.pending[key].slice(-250);save();
+}
+function pathPriceAt(t0,h){
+  var due=t0+h*60000,arr=S.tape;
+  for(var i=0;i<arr.length;i++)if(arr[i].t>=due-1000)return{t:arr[i].t,p:arr[i].p};
+  return null;
+}
+function pathBetween(t0,h){
+  var due=t0+h*60000,arr=S.tape.filter(function(x){return x.t>=t0&&x.t<=due+5000});
+  return arr;
+}
+function learnGrid(h,p,path){
+  if(!finite(p.entry)||!finite(p.atr)||!path.length)return;
+  var g=grid(h,p.dir);
+  for(var i=0;i<g.length;i++){
+    var x=g[i],sd=p.atr*x.sl,td=p.atr*x.tp,dir=p.dir==='SHORT'?-1:1,out=null;
+    for(var j=0;j<path.length;j++){
+      var q=path[j].p,hitSL=dir>0?q<=p.entry-sd:q>=p.entry+sd,hitTP=dir>0?q>=p.entry+td:q<=p.entry-td;
+      if(hitSL){out=-x.sl;break}if(hitTP){out=x.tp;break}
+    }
+    if(out===null){var last=path[path.length-1].p;out=dir>0?(last-p.entry)/p.atr:(p.entry-last)/p.atr}
+    x.n++;x.ev=((x.ev*(x.n-1))+out)/x.n;
+  }
+  save();
+}
+function resolve(){
+  for(var hi=0;hi<H.length;hi++){
+    var h=H[hi],key=S.coin+'_'+h,a=DB.pending[key]||[],keep=[];
+    for(var i=0;i<a.length;i++){
+      var p=a[i],due=p.ts+h*60000;if(now()<due-1500){keep.push(p);continue}
+      var at=pathPriceAt(p.ts,h);if(!at){keep.push(p);continue}
+      var r=at.p/p.p0-1,target=labelFromReturn(r,p.targetThr),base=model(h,'base'),full=model(h,'full');
+      var baseLog=forecastLogits(base,p.vBase),fullLog=forecastLogits(full,p.vFull);
+      var prB=sigmoid(baseLog.map(function(x){return x/(base.temp||1)})),prF=sigmoid(fullLog.map(function(x){return x/(full.temp||1)}));
+      base.obs.push({logits:baseLog,target:target});full.obs.push({logits:fullLog,target:target});base.obs=base.obs.slice(-300);full.obs=full.obs.slice(-300);
+      update(base,target,prB,p.vBase);update(full,target,prF,p.vFull);
+      calibrate(base);calibrate(full);
+      if(DB.obs[key]==null)DB.obs[key]=[];DB.obs[key].push({ts:p.ts,target:target,pb:prB,pf:prF});DB.obs[key]=DB.obs[key].slice(-500);
+      learnGrid(h,p,pathBetween(p.ts,h));
+    }
+    DB.pending[key]=keep;
+  }
+  save();
+}
+function statsFor(h){
+  var m=model(h,'full'),o=DB.obs[S.coin+'_'+h]||[];
+  if(!o.length)return{n:0,b:NaN,ll:NaN,hit:NaN,roll:NaN,delta:NaN,ciLo:NaN,ciHi:NaN};
+  var bs=o.map(function(x){return brier(x.pf,x.target)}),ls=o.map(function(x){return logloss(x.pf,x.target)}),hits=o.map(function(x){return x.pf.indexOf(Math.max.apply(null,x.pf))===x.target?1:0}),recent=bs.slice(-50);
+  var dif=o.map(function(x){return brier(x.pb,x.target)-brier(x.pf,x.target)}),md=metricArr(dif),sd=Math.sqrt(dif.reduce(function(s,x){return s+(x-md)*(x-md)},0)/Math.max(1,dif.length-1)),se=sd/Math.sqrt(Math.max(1,dif.length)),margin=1.96*se;
+  return{n:o.length,b:metricArr(bs),ll:metricArr(ls),hit:metricArr(hits),roll:metricArr(recent),delta:md,ciLo:md-margin,ciHi:md+margin};
+}
+function pasrVerdict(h){
+  var s=statsFor(h);
+  if(s.n<100||!finite(s.delta))return'INCONCLUSIF';
+  if(s.ciLo>0)return'HELPING';
+  if(s.ciHi<0)return'HURTING';
+  return'INCONCLUSIF';
+}
+async function hl(body){
+  var r=await fetch(HLAPI,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+  if(!r.ok)throw Error('HL '+r.status);return r.json();
+}
+async function restSync(){
+  var t=now();
+  try{
+    var out=await Promise.all([
+      hl({type:'candleSnapshot',req:{coin:S.coin,interval:'1m',startTime:t-3*86400000,endTime:t}}),
+      hl({type:'metaAndAssetCtxs'}),
+      fetch(BNAPI+'/fapi/v1/openInterest?symbol='+S.coin+'USDT').then(function(r){return r.json()}),
+      fetch(BNAPI+'/fapi/v1/premiumIndex?symbol='+S.coin+'USDT').then(function(r){return r.json()})
+    ]);
+    S.hl.candles=(out[0]||[]).map(function(q){return{t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v}}).sort(function(a,b){return a.t-b.t}).slice(-5000);
+    var idx=out[1]&&out[1][0]&&out[1][0].universe?out[1][0].universe.findIndex(function(q){return q.name===S.coin}):-1;
+    if(idx>=0&&out[1][1]&&out[1][1][idx]){S.hl.oi=+out[1][1][idx].openInterest;S.hl.funding=+out[1][1][idx].funding;S.hl.lastCtx=t}
+    if(out[2]&&out[2].openInterest){S.bn.oi=+out[2].openInterest;S.bn.oiHist.push({t:t,v:S.bn.oi});S.bn.oiHist=S.bn.oiHist.slice(-1000)}
+    if(out[3]&&out[3].lastFundingRate!=null)S.bn.funding=+out[3].lastFundingRate;
+    S.feed.HL_CANDLE='OK';S.feed.HL_CTX='OK';S.feed.BN_REST='OK';S.lastRest=t;S.bn.lastRest=t;
+  }catch(e){S.feed.BN_REST='STALE'}
+}
+function reconnectHL(){
+  var attempt=0,timer=null;
+  function go(){
+    attempt++;S.feed.HL_WS='RECONNECTING';
+    try{
+      var ws=new WebSocket(HLWS);S.hlSocket=ws;
+      ws.onopen=function(){attempt=0;S.feed.HL_WS='OK';
+        var subs=[{type:'allMids'},{type:'l2Book',coin:S.coin},{type:'trades',coin:S.coin},{type:'candle',coin:S.coin,interval:'1m'},{type:'activeAssetCtx',coin:S.coin}];
+        subs.forEach(function(sub){ws.send(JSON.stringify({method:'subscribe',subscription:sub}))});
+        clearInterval(timer);timer=setInterval(function(){if(ws.readyState===1)ws.send(JSON.stringify({method:'ping'}))},20000);
+      };
+      ws.onmessage=function(e){try{
+        var m=JSON.parse(e.data),t=now();
+        if(m.channel==='allMids'&&m.data&&m.data.mids&&m.data.mids[S.coin]!=null){S.hl.price=+m.data.mids[S.coin];S.hl.lastPrice=t;S.tape.push({t:t,p:S.hl.price});S.tape=S.tape.slice(-25000)}
+        else if(m.channel==='l2Book'){S.hl.book=m.data;S.hl.lastBook=t;S.feed.HL_L2='OK'}
+        else if(m.channel==='trades'){var ar=Array.isArray(m.data)?m.data:[m.data];for(var i=0;i<ar.length;i++)if(ar[i]&&ar[i].side&&ar[i].sz!=null)S.hl.trades.push({time:+ar[i].time||t,side:ar[i].side==='B'?'B':'S',sz:+ar[i].sz});S.hl.trades=S.hl.trades.slice(-12000);S.hl.lastTrades=t;S.feed.HL_TRADES='OK'}
+        else if(m.channel==='candle'){var q=m.data;if(q&&q.t!=null){S.hl.candles.push({t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v});var mm={};for(var j=0;j<S.hl.candles.length;j++)mm[S.hl.candles[j].t]=S.hl.candles[j];S.hl.candles=Object.keys(mm).sort(function(a,b){return +a-+b}).map(function(k){return mm[k]}).slice(-5000);S.feed.HL_CANDLE='OK'}}
+        else if(m.channel==='activeAssetCtx'){var q2=m.data&&m.data.ctx?m.data.ctx:m.data;if(q2){if(q2.openInterest!=null){S.hl.oi=+q2.openInterest;S.hl.oiHist.push({t:t,v:S.hl.oi});S.hl.oiHist=S.hl.oiHist.slice(-1000)}if(q2.funding!=null)S.hl.funding=+q2.funding;S.hl.lastCtx=t;S.feed.HL_CTX='OK'}}
+      }catch(e){}};
+      ws.onclose=function(){clearInterval(timer);S.feed.HL_WS='RECONNECTING';setTimeout(go,clamp(1000*Math.pow(2,Math.min(attempt,6)),1000,30000)+Math.random()*1000)};
+      ws.onerror=function(){try{ws.close()}catch(e){}};
+    }catch(e){setTimeout(go,3000)}
+  }
+  go();
+}
+function reconnectBN(){
+  var attempt=0;
+  function go(){
+    attempt++;S.feed.BN_WS='RECONNECTING';
+    try{
+      var base=S.coin.toLowerCase()+'usdt',ws=new WebSocket(BNWS+'?streams='+base+'@aggTrade/'+base+'@markPrice@1s/'+base+'@forceOrder');
+      S.bnSocket=ws;
+      ws.onopen=function(){attempt=0;S.feed.BN_WS='OK'};
+      ws.onmessage=function(e){try{
+        var m=JSON.parse(e.data),d=m.data,s=m.stream||'',t=now();
+        if(s.indexOf('@aggTrade')>=0){S.bn.perp.push({time:d.T||d.E,side:d.m?'S':'B',sz:+d.q});S.bn.perp=S.bn.perp.slice(-5000);S.bn.lastPerp=t}
+        else if(s.indexOf('@markPrice')>=0){S.bn.price=+d.p;S.bn.funding=+d.r;S.bn.lastMark=t;S.tape.push({t:t,p:S.hl.price});S.tape=S.tape.slice(-25000)}
+        else if(s.indexOf('@forceOrder')>=0&&d.o){S.bn.liq.push({time:t,side:d.o.S||'SELL',notional:Math.abs(+(d.o.p||0)*+(d.o.q||0))});S.bn.liq=S.bn.liq.slice(-3000);S.bn.lastLiq=t}
+      }catch(e){}};
+      ws.onclose=function(){S.feed.BN_WS='RECONNECTING';setTimeout(go,clamp(1200*Math.pow(2,Math.min(attempt,6)),1200,30000))};
+      ws.onerror=function(){try{ws.close()}catch(e){}};
+    }catch(e){setTimeout(go,3000)}
+  }
+  go();
+}
+function restSpot(){
+  fetch(BN_SPOT+'?symbol='+S.coin+'USDT&limit=1000').then(function(r){return r.ok?r.json():[]}).then(function(a){
+    for(var i=0;i<a.length;i++)S.bn.spot.push({time:a[i].T||now(),side:a[i].m?'S':'B',sz:+a[i].q});
+    S.bn.spot=S.bn.spot.slice(-5000);S.bn.lastSpot=now();S.feed.BN_SPOT='OK';
+  }).catch(function(){S.feed.BN_SPOT='STALE'});
+}
+async function warmStart(){
+  var key=S.coin,meta=DB.pretrain[key]||{};
+  if(meta.done){$('learningNote').textContent='PRETRAIN déjà présent pour '+S.coin+' : le Warm-start ne réinitialise plus le live. Utilise un navigateur/localStorage vierge pour repartir de zéro.';return}
+  $('modeBadge').textContent='PRETRAIN';$('learningNote').textContent='Warm-start en cours : historique 1m prix, sans prétendre reconstruire l’ancien L2 Hyperliquid.';
+  meta.started=now();meta.n=0;DB.pretrain[key]=meta;save();
+  for(var hi=0;hi<H.length;hi++){
+    var h=H[hi];
+    try{
+      var end=now()-2*h*60000,start=end-5*86400000,res=await hl({type:'candleSnapshot',req:{coin:S.coin,interval:'1m',startTime:start,endTime:end}}),bars=(res||[]).map(function(q){return{t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v}}).sort(function(a,b){return a.t-b.t});
+      if(bars.length<500)continue;
+      var bm=model(h,'base'),fm=model(h,'full'),step=2;
+      for(var i=80;i<bars.length-h;i+=step){
+        var c=bars.slice(0,i+1),clo=c.map(function(q){return q.c}),f={r1:ret(clo,1),r5:ret(clo,5),r15:ret(clo,15),r60:ret(clo,60),ema:ema(clo.slice(-180),9)/ema(clo.slice(-180),21)-1,l2:NaN,micro:NaN,flow:NaN,absorption:NaN,funding:NaN,basis:NaN,spotPerp:NaN,doi:NaN,liq:NaN,pasr:NaN,atr:atr(c.slice(-120))};
+        var r=bars[i+h].c/bars[i].c-1,thr=clamp((f.atr||bars[i].c*.0025)/bars[i].c*.45,.0004,.01),target=labelFromReturn(r,thr),vb=vec(f,false),zb=forecastLogits(bm,vb),pb=sigmoid(zb),vf=vec(f,true),zf=forecastLogits(fm,vf),pf=sigmoid(zf);
+        update(bm,target,pb,vb);update(fm,target,pf,vf);bm.obs.push({logits:zb,target:target});fm.obs.push({logits:zf,target:target});
+        meta.n++;
+      }
+      bm.obs=bm.obs.slice(-300);fm.obs=fm.obs.slice(-300);
+      calibrate(bm);calibrate(fm);
+    }catch(e){}
+    $('hist').textContent=meta.n;await new Promise(function(r){setTimeout(r,0)});
+  }
+  meta.done=true;meta.finished=now();DB.pretrain[key]=meta;save();$('modeBadge').textContent='LIVE';$('learningNote').textContent='PRETRAIN terminé : transfert prix. L2/flow/PASR sont appris uniquement sur OOS live, sans données historiques inventées.';dashboard();
+}
+function renderEvidence(f,m){
+  var arr=[
+    ['L2',f.l2],['Microprice',f.micro],['Structure',finite(f.r15)?f.r15*350:NaN],['Flow',f.flow],['Absorption',f.absorption],
+    ['Dérivés',finite(f.funding)?f.funding:NaN],['Basis',f.basis],['Spot−Perp',f.spotPerp],['ΔOI',f.doi],['Liquidations',f.liq],['PASR',f.pasr]
+  ].filter(function(x){return finite(x[1])}).sort(function(a,b){return Math.abs(b[1])-Math.abs(a[1])});
+  var html=arr.slice(0,6).map(function(x){var c=x[1]>0?'up':'down';return'<div class="ev"><div class="evtop"><b>'+x[0]+'</b><span class="badge '+c+'">'+(x[1]>0?'+':'')+x[1].toFixed(3)+'</span></div><div class="tiny">'+(Math.abs(x[1])>.7?'fort':Math.abs(x[1])>.3?'modéré':'faible')+'</div></div>'}).join('');
+  $('matrix').innerHTML=html||'<div class="note">Pas assez de données fraîches.</div>';
+  $('why').innerHTML=html||'<div class="note">Pas assez de données fraîches.</div>';
+  return arr;
+}
+function renderBook(f){
+  var d=f.depth||{};
+  $('book').innerHTML='<div><div class="line"><span>Bid</span><b>'+nfmt(d.bid)+'</b></div><div class="line"><span>Bid depth</span><b>'+nfmt(d.bs,3)+'</b></div></div>'+
+    '<div><div class="line"><span>Ask</span><b>'+nfmt(d.ask)+'</b></div><div class="line"><span>Ask depth</span><b>'+nfmt(d.as,3)+'</b></div></div>'+
+    '<div style="grid-column:1/-1"><div class="line"><span>Imbalance</span><b>'+pct(d.imb)+'</b></div><div class="line"><span>Microprice bias</span><b>'+pct(d.microBias,3)+'</b></div><div class="line"><span>Spread</span><b>'+pct(d.spread,4)+'</b></div></div>';
+}
+function renderHealth(){
+  var map=Object.keys(S.feed).map(function(k){
+    var v=S.feed[k],cls=v==='OK'?'ok':v==='STALE'?'warn':'bad';
+    return'<div class="src"><div class="tiny">'+k+'</div><b class="'+cls+'">'+v+'</b></div>';
+  }).join('');
+  $('health').innerHTML=map;$('healthText').textContent=S.coin+' · '+new Date().toLocaleTimeString('fr-FR')+' · tick '+(S.hl.lastPrice?Math.max(0,Math.round((now()-S.hl.lastPrice)/1000)):'—')+'s';
+}
+function journal(){
+  $('journal').innerHTML=H.map(function(h){
+    var s=statsFor(h),pre=DB.pretrain[S.coin]&&DB.pretrain[S.coin].n||0,ver=pasrVerdict(h);
+    return'<tr><td>'+h+'m</td><td>'+pre+'</td><td>'+s.n+'</td><td>'+nfmt(s.b,4)+'</td><td>'+nfmt(s.ll,4)+'</td><td>'+pct(s.hit,1)+'</td><td>'+nfmt(s.delta,4)+'</td><td>'+ver+'</td></tr>';
+  }).join('');
+}
+function draw(){
+  var a=S.hl.candles.slice(-180),c=$('chart'),x=c.getContext('2d'),r=c.getBoundingClientRect(),d=devicePixelRatio||1;
+  c.width=r.width*d;c.height=r.height*d;x.scale(d,d);x.clearRect(0,0,r.width,r.height);if(a.length<2)return;
+  var lo=Math.min.apply(null,a.map(function(q){return q.l})),hi=Math.max.apply(null,a.map(function(q){return q.h})),rg=hi-lo||1;
+  var X=function(i){return 36+i/(a.length-1)*(r.width-48)},Y=function(v){return 12+(hi-v)/rg*(r.height-44)};
+  x.strokeStyle='#17303b';for(var i=0;i<5;i++){var yy=12+i/4*(r.height-44);x.beginPath();x.moveTo(36,yy);x.lineTo(r.width-12,yy);x.stroke()}
+  for(var j=0;j<a.length;j++){var q=a[j],cx=X(j),up=q.c>=q.o;x.strokeStyle=up?'#43d19d':'#ff7082';x.beginPath();x.moveTo(cx,Y(q.h));x.lineTo(cx,Y(q.l));x.stroke();x.fillStyle=x.strokeStyle;x.fillRect(cx-1.6,Y(Math.max(q.o,q.c)),3.2,Math.max(1,Y(Math.min(q.o,q.c))-Y(Math.max(q.o,q.c))))}
+}
+function dashboard(){
+  var f=feats(),m=mixed(S.h,f),pl=orderPlan(S.h,f,m),q=pl.q,dir=pl.direction,st=statsFor(S.h),pv=pasrVerdict(S.h);
+  $('dir').textContent=dir;$('dir').className='dir '+(dir==='LONG'?'up':dir==='SHORT'?'down':'neu');
+  $('prob').textContent=dir==='NO TRADE'?'—':(pl.pd*100).toFixed(0)+'%';$('hz').textContent=S.h+'m';
+  $('pL').textContent=pct(m.p[2]);$('pN').textContent=pct(m.p[1]);$('pS').textContent=pct(m.p[0]);
+  $('bL').style.width=m.p[2]*100+'%';$('bN').style.width=m.p[1]*100+'%';$('bS').style.width=m.p[0]*100+'%';$('bL').style.background='var(--u)';$('bN').style.background='var(--n)';$('bS').style.background='var(--d)';
+  var regime=Math.abs(f.r15||0)>.003?'TREND':Math.abs(f.l2||0)>.4?'LIQUIDITÉ':'TRANSITION';
+  $('reg').textContent='Régime '+regime+' · DQ '+q+'/100';$('dq').textContent='DQ '+q;$('score').textContent='P(L)-P(S) '+(m.p[2]-m.p[0]).toFixed(3);
+  $('act').textContent=dir==='LONG'?'BUY':dir==='SHORT'?'SELL':'NO TRADE';$('ord').textContent=dir==='NO TRADE'?'ABSTAIN':'READY';
+  $('entry').textContent=nfmt(pl.entry);$('sl').textContent=nfmt(pl.sl);$('tp').textContent=nfmt(pl.tp);$('rr').textContent=finite(pl.rr)?'1:'+pl.rr.toFixed(2):'—';$('size').textContent=finite(pl.size)?pl.size.toFixed(5):'—';
+  $('whyOrder').textContent=pl.reason;$('headline').textContent=dir==='NO TRADE'?'aucune position à prendre maintenant':'plan '+(dir==='LONG'?'acheteur':'vendeur')+' généré';
+  $('invalidate').textContent='Invalidation : DQ < 75, probabilité directionnelle < 55 %, écart direction/opposé < 8 pts, L2 absent/stale ou EV ≤ 0.';
+  renderEvidence(f,m);renderBook(f);
+  $('oi').textContent=nfmt(S.hl.oi,0);var old=S.hl.oiHist.filter(function(q){return q.t<=now()-5*60000}).slice(-1)[0];$('doi').textContent=old&&finite(S.hl.oi)?pct(S.hl.oi/old.v-1):'—';
+  $('fund').textContent=pct(S.hl.funding,4);$('basis').textContent=finite(S.hl.price)&&finite(S.bn.price)?((S.hl.price/S.bn.price-1)*10000).toFixed(1)+' bps':'—';
+  $('spotCvd').textContent=pct(flowRatio(S.bn.spot),1);$('perpCvd').textContent=pct(flowRatio(S.bn.perp),1);$('liq').textContent=pct(liqRatio(S.bn.liq),1);$('atr').textContent=nfmt(f.atr,2);
+  $('derSt').textContent=fresh(S.hl.lastCtx,30000)&&fresh(S.bn.lastMark,5000)?'live':'dégradé';$('l2st').textContent=fresh(S.hl.lastBook,5000)?'live':'stale';
+  var fm=model(S.h,'full'),w=fm.w[2]&&fm.w[2][FEATS.indexOf('pasr')*2]||0;
+  $('c4').textContent=finite(f.pasr)?f.pasr.toFixed(3):'—';$('pasrW').textContent=w.toFixed(4);$('deltaB').textContent=finite(st.delta)?st.delta.toFixed(4):'—';$('pasrN').textContent=st.n;$('pasrV').textContent=pv;$('pasrState').textContent=pv;$('bucketN').textContent=f.pasrN;
+  $('hist').textContent=DB.pretrain[S.coin]&&DB.pretrain[S.coin].n||0;$('live').textContent=st.n;$('brier').textContent=nfmt(st.b,4);$('logloss').textContent=nfmt(st.ll,4);$('hit').textContent=pct(st.hit,1);$('roll').textContent=nfmt(st.roll,4);$('pend').textContent=(DB.pending[S.coin+'_'+S.h]||[]).length;
+  $('learnState').textContent=st.n<30?'LEARNING':st.n<100?'CALIBRATING': 'ADAPTIVE';
+  $('kPrice').textContent=nfmt(S.hl.price,2);$('kDQ').textContent=q+'/100';$('kMix').textContent=Math.round(m.alpha*100)+'% FULL';var ages=[S.hl.lastBook,S.hl.lastTrades,S.bn.lastPerp,S.bn.lastMark].filter(function(x){return x>0}).map(function(x){return Math.max(0,now()-x)/1000});$('kFresh').textContent=ages.length?Math.round(Math.max.apply(null,ages))+'s':'—';
+  $('kTarget').textContent=finite(pl.pd)?(pl.candidate+' '+(pl.pd*100).toFixed(1)+'%'): '—';
+  $('chartInfo').textContent='HL '+nfmt(S.hl.price)+' · BN '+nfmt(S.bn.price);renderHealth();journal();$('audit').textContent='PRETRAIN prix = '+(DB.pretrain[S.coin]&&DB.pretrain[S.coin].n||0)+' labels, non présenté comme OOS full. LIVE OOS = prévision gelée à t0 puis résolue au prix observé à t0+h. BASE exclut les features microstructurelles/PASR; FULL les apprend en live. PASR = feature expérimentale, verdict par différence Brier appariée + IC approximatif à 95 %. Warm-start ne réinitialise plus le live.';
+}
+async function boot(){
+  S.coin=$('coin').value;S.h=+$('hor').value;S.capital=+$('capital').value||1000;S.risk=+$('risk').value||.5;
+  reconnectHL();reconnectBN();restSpot();await restSync();await warmStart();dashboard();
+  setInterval(function(){if(now()-S.lastRest>15000)restSync();restSpot();resolve();dashboard()},5000);
+  setInterval(function(){if(now()-S.lastForecast>55000){for(var i=0;i<H.length;i++){var f=feats(),m=mixed(H[i],f),pl=orderPlan(H[i],f,m);recordForecast(H[i],f,m,pl)}S.lastForecast=now()}},5000);
+}
+$('coin').onchange=function(){S.coin=$('coin').value;location.reload()};
+$('hor').onchange=function(){S.h=+$('hor').value;dashboard()};
+$('capital').oninput=function(){S.capital=+$('capital').value||1000};
+$('risk').oninput=function(){S.risk=+$('risk').value||.5};
+$('relearn').onclick=function(){warmStart()};
+boot();
+</script>
+</body>
+</html>
