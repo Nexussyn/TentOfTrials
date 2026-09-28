@@ -188,7 +188,7 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
     <div class="kbox"><div class="tiny">ENGAGÉ</div><b id="portUsed">—</b></div>
     <div class="kbox"><div class="tiny">DISPONIBLE</div><b id="portFree">—</b></div>
     <div class="kbox"><div class="tiny">POSITIONS</div><b id="portSlots">—</b></div>
-    <div class="kbox"><div class="tiny">RISQUE OUVERT</div><b id="portRisk">—</b></div>
+    <div class="kbox"><div class="tiny">RISQUE OUVERT RÉEL</div><b id="portRisk">—</b></div>
   </div>
   <div id="portfolioGrid" class="portfolioGrid"></div>
   <div id="portfolioNote" class="note" style="margin-top:9px">
@@ -404,7 +404,8 @@ function portfolioOpen(coin,h,f,pl){
   if(margin>marginCap){size=(marginCap*P.maxLeverage)/pl.entry;notional=Math.abs(size*pl.entry);margin=notional/P.maxLeverage}
   if(margin>free*0.98){size=(free*0.98*P.maxLeverage)/pl.entry;notional=Math.abs(size*pl.entry);margin=notional/P.maxLeverage}
   if(!(margin>0&&margin<=free))return false;
-  p.positions[coin]={coin:coin,h:h,ts:t,direction:pl.direction,entry:pl.entry,sl:pl.sl,tp:pl.tp,size:size,notional:notional,margin:margin,riskCash:riskCash,paperFee:S.fee,lastTs:t,prob:pl.pd,edge:pl.edge,ev:pl.ev};
+  var actualRiskCash=size*(riskDist+feePerUnit);
+  p.positions[coin]={coin:coin,h:h,ts:t,direction:pl.direction,entry:pl.entry,sl:pl.sl,tp:pl.tp,size:size,notional:notional,margin:margin,riskCash:actualRiskCash,paperFee:S.fee,lastTs:t,prob:pl.pd,edge:pl.edge,ev:pl.ev};
   DB.portfolio=p;save();return true;
 }
 function portfolioSettle(coin,exit,reason,ts){
