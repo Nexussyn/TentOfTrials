@@ -37,3 +37,9 @@ NO TRADE is emitted when data quality, conflict, or directional evidence fails t
 ## Public entry
 
 The static bundle can be served directly by a public static host. No API keys, private keys, exchange account or execution permission are required.
+
+## Browser preview
+Development preview: https://raw.githack.com/Nexussyn/TentOfTrials/crypto-direction-engine/crypto-direction-engine-v2/index.html
+
+## Repository archive
+https://github.com/Nexussyn/TentOfTrials/archive/refs/heads/crypto-direction-engine.zip
