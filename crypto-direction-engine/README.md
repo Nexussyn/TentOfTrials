@@ -4,7 +4,7 @@ Public no-login crypto market direction cockpit.
 
 ## Live public build
 
-- Standalone browser build: https://rawcdn.githack.com/Nexussyn/TentOfTrials/592a4d0e9daedbab49fd91d8d28a91040b573158/crypto-direction-engine/public/live.html
+- Standalone browser build: https://rawcdn.githack.com/Nexussyn/TentOfTrials/c9a3484649641d46c1b40a43874eabfca595521e9/crypto-direction-engine/public/live.html
 - Source tree: https://github.com/Nexussyn/TentOfTrials/tree/crypto-direction-engine/crypto-direction-engine
 
 The standalone page is static and calls the public Hyperliquid and Binance market-data endpoints directly from the browser. No exchange key or account is used.
