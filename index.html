@@ -1227,29 +1227,15 @@ async function portfolioBootstrap(){
   return{done:done,trained:trained,requests:starts,assets:list.length,bars:needBars};
 }
 async function warmStart(){
-  var key=S.coin,meta=DB.pretrain[key]||{}; meta.h=meta.h||{};
-  if(H.every(function(h){return meta.h[h]&&meta.h[h].done})){ $('learningNote').textContent='PRETRAIN déjà présent pour '+S.coin+' : le Warm-start ne réinitialise plus le live. Build V14.0 NET-EV.'; $('modeBadge').textContent='LIVE'; dashboard(); return; }
-  $('modeBadge').textContent='PRETRAIN';$('learningNote').textContent='Warm-start en cours : historique 1m prix sur la fenêtre maximale publique d’environ 3,4 jours. Le L2 historique complet n’est pas simulé.';
-  meta.started=meta.started||now();DB.pretrain[key]=meta;save();
-  for(var hi=0;hi<H.length;hi++){
-    var h=H[hi]; meta.h[h]=meta.h[h]||{n:0,done:false}; if(meta.h[h].done)continue;
-    try{
-      var end=now()-2*h*60000,start=end-4990*60000,res=await hl({type:'candleSnapshot',req:{coin:S.coin,interval:'1m',startTime:start,endTime:end}}),bars=(res||[]).map(function(q){return{t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v}}).sort(function(a,b){return a.t-b.t});
-      if(bars.length<500)continue;
-      var bm=model(h,'base'),fm=model(h,'full'),step=2;
-      for(var i=80;i<bars.length-h;i+=step){
-        var c=bars.slice(0,i+1),clo=c.map(function(q){return q.c}),f={r1:ret(clo,1),r5:ret(clo,5),r15:ret(clo,15),r60:ret(clo,60),ema:ema(clo.slice(-180),9)/ema(clo.slice(-180),21)-1,l2:NaN,micro:NaN,flow:NaN,absorption:NaN,funding:NaN,basis:NaN,spotPerp:NaN,doi:NaN,liq:NaN,pasr:NaN,atr:atr(c.slice(-120))};
-        var r=bars[i+h].c/bars[i].c-1,thr=targetThreshold(bars[i].c,f.atr,h),target=labelFromReturn(r,thr),vb=vec(f,false),zb=forecastLogits(bm,vb),pb=sigmoid(zb),vf=vec(f,true),zf=forecastLogits(fm,vf),pf=sigmoid(zf);
-        update(bm,target,pb,vb,false);update(fm,target,pf,vf,false);bm.obs.push({logits:zb,target:target,source:'PRETRAIN'});fm.obs.push({logits:zf,target:target,source:'PRETRAIN'});
-        meta.n++;
-      }
-      bm.obs=bm.obs.slice(-300);fm.obs=fm.obs.slice(-300);
-      calibrate(bm,'PRETRAIN');calibrate(fm,'PRETRAIN'); meta.h[h].n=bm.seen; meta.h[h].done=true;
-    }catch(e){diagError('PRETRAIN_'+h,e)}
-    var total=H.reduce(function(s,hh){return s+((meta.h[hh]&&meta.h[hh].n)||0)},0);meta.n=total;DB.pretrain[key]=meta;save();
-    $('hist').textContent=(meta.h[S.h]&&meta.h[S.h].n)||0;await new Promise(function(r){setTimeout(r,0)});
+  $('modeBadge').textContent='BOOTSTRAP';
+  $('learningNote').textContent='Bootstrap univers : chargement progressif des bougies et entraînement des modèles 5m/15m/1h sur chaque marché. Le live OOS n’est jamais réinitialisé.';
+  try{
+    await portfolioBootstrap();
+    portfolioScan();
+  }finally{
+    $('modeBadge').textContent='LIVE';
+    dashboard();
   }
-  meta.done=H.every(function(hh){return meta.h[hh]&&meta.h[hh].done});meta.finished=now();DB.pretrain[key]=meta;save();$('modeBadge').textContent='LIVE';$('learningNote').textContent='PRETRAIN terminé : transfert prix. L2/flow/PASR sont appris uniquement sur OOS live, sans données historiques inventées.';dashboard();
 }
 function renderEvidence(f,m){
   var arr=[
@@ -1340,6 +1326,28 @@ function dashboard(){
   $('chartInfo').textContent='HL '+nfmt(S.hl.price)+' · focus dynamique '+P.focusCoin;
   try{renderCapital()}catch(e){}try{renderPortfolio()}catch(e){}try{renderHealth()}catch(e){}try{journal()}catch(e){}
   $('audit').textContent='V16 = portefeuille unique sur tout l’univers Hyperliquid. Les anciens comptes paper par horizon ne pilotent plus l’ouverture. Chaque marché est évalué sur les horizons '+TRADE_H.join('/')+' min, puis le meilleur horizon par actif est comparé aux autres actifs. Les shadow forecasts OOS sont créés même lorsque NO TRADE est affiché; à résolution, leur rendement net après frais, slippage et spread alimente la calibration globale et locale. Aucune donnée Binance n’est nécessaire à la décision. Les nouvelles positions sont limitées aux meilleures opportunités et au budget de risque agrégé; un time-stop empêche une position de monopoliser le capital. Rentabilité non présumée : elle doit être démontrée par le rendement net OOS.';
+}
+function migrateV16(){
+  if(DB.engineVersion===16)return;
+  var p=portfolioState(),oldPositions=Object.keys(p.positions||{}).length;
+  if(oldPositions){
+    p.positions={};
+    p.migration=(p.migration||[]).concat([{ts:now(),from:'V15',droppedPositions:oldPositions,reason:'V16_PORTFOLIO_RESET'}]);
+  }
+  DB.paper={};
+  DB.engineVersion=16;
+  Object.keys(DB.obs||{}).forEach(function(key){
+    var m=key.match(/^(.*)_([0-9]+)$/);if(!m)return;
+    var coin=m[1],h=+m[2],arr=DB.obs[key]||[];
+    for(var i=0;i<arr.length;i++){
+      var x=arr[i];
+      if(x&&finite(x.netRet)&&Number.isInteger(x.target)){
+        updateProfitCalibration(h,coin,x.candidate==='SHORT'?'SHORT':'LONG',x.target,x.netRet,true);
+      }
+    }
+  });
+  DB.portfolio=p;
+  save();
 }
 function syntheticState(){
   var t=now(),base=83250;
