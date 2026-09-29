@@ -234,7 +234,7 @@ var $=function(id){return document.getElementById(id)};
 var HLWS='wss://api.hyperliquid.xyz/ws', HLAPI='https://api.hyperliquid.xyz/info';
 var BNWS='wss://fstream.binance.com/stream', BNAPI='https://fapi.binance.com';
 var BN_SPOT='https://api.binance.com/api/v3/aggTrades';
-var H=[5,15,60,240,1440], FEATS=['r1','r5','r15','r60','ema','l2','micro','flow','absorption','funding','basis','spotPerp','doi','liq','pasr'];
+var H=[5,15,60,240,1440], TRADE_H=[5,15,60], FEATS=['r1','r5','r15','r60','ema','l2','micro','flow','absorption','funding','basis','spotPerp','doi','liq','pasr'];
 var STORE='cde_persistent_v2';
 var LEGACY_STORES=['cde_v11_learning_v1','cde_public_learning_v10'];
 var IDB_NAME='CDE_PERSISTENT_DB',IDB_VERSION=1,IDB_STORE='snapshots';
@@ -481,23 +481,27 @@ function portfolioMark(coin){
   return{price:price,pos:pos,realized:realized,unreal:unreal,total:realized+(finite(unreal)?unreal:0)};
 }
 function bootstrapPortfolioModel(coin){
-  var h=P.h,a=ensureAsset(coin),bars=a.hl.candles.slice(-5000),need=Math.min(5000,Math.max(500,h+440));if(bars.length<Math.min(need,180))return false;
+  var a=ensureAsset(coin),bars=a.hl.candles.slice(-5000),trained=0;
   return withAsset(coin,function(){
-    var bm=model(h,'base'),fm=model(h,'full'),gb=globalModel(h,'base'),gf=globalModel(h,'full');
-    if((bm.seen||0)>=120&&(gb.seen||0)>=120)return true;
-    for(var i=80;i<bars.length-h;i+=3){
-      var c=bars.slice(0,i+1),clo=c.map(function(q){return q.c}),ff={r1:ret(clo,1),r5:ret(clo,5),r15:ret(clo,15),r60:ret(clo,60),ema:ema(clo.slice(-180),9)/ema(clo.slice(-180),21)-1,l2:NaN,micro:NaN,flow:NaN,absorption:NaN,funding:NaN,basis:NaN,spotPerp:NaN,doi:NaN,liq:NaN,pasr:NaN,atr:atr(c.slice(-120))};
-      var rr=bars[i+h].c/bars[i].c-1,thr=targetThreshold(bars[i].c,ff.atr,h),target=labelFromReturn(rr,thr),vb=vec(ff,false),vf=vec(ff,true),z1=forecastLogits(bm,vb),z2=forecastLogits(fm,vf),z3=forecastLogits(gb,vb),z4=forecastLogits(gf,vf);
-      update(bm,target,sigmoid(z1),vb,false);update(fm,target,sigmoid(z2),vf,false);update(gb,target,sigmoid(z3),vb,false);update(gf,target,sigmoid(z4),vf,false);
+    for(var qi=0;qi<TRADE_H.length;qi++){
+      var h=TRADE_H[qi],need=Math.min(5000,Math.max(500,h+440));if(bars.length<Math.min(need,180))continue;
+      var bm=model(h,'base'),fm=model(h,'full'),gb=globalModel(h,'base'),gf=globalModel(h,'full');
+      if((bm.seen||0)>=120&&(gb.seen||0)>=120)continue;
+      for(var i=80;i<bars.length-h;i+=3){
+        var c=bars.slice(0,i+1),clo=c.map(function(q){return q.c}),ff={r1:ret(clo,1),r5:ret(clo,5),r15:ret(clo,15),r60:ret(clo,60),ema:ema(clo.slice(-180),9)/ema(clo.slice(-180),21)-1,l2:NaN,micro:NaN,flow:NaN,absorption:NaN,funding:NaN,basis:NaN,spotPerp:NaN,doi:NaN,liq:NaN,pasr:NaN,atr:atr(c.slice(-120))};
+        var rr=bars[i+h].c/bars[i].c-1,thr=targetThreshold(bars[i].c,ff.atr,h),target=labelFromReturn(rr,thr),vb=vec(ff,false),vf=vec(ff,true),z1=forecastLogits(bm,vb),z2=forecastLogits(fm,vf),z3=forecastLogits(gb,vb),z4=forecastLogits(gf,vf);
+        update(bm,target,sigmoid(z1),vb,false);update(fm,target,sigmoid(z2),vf,false);update(gb,target,sigmoid(z3),vb,false);update(gf,target,sigmoid(z4),vf,false);
+      }
+      calibrate(bm,'PRETRAIN');calibrate(fm,'PRETRAIN');calibrate(gb,'PRETRAIN');calibrate(gf,'PRETRAIN');trained++;
     }
-    calibrate(bm,'PRETRAIN');calibrate(fm,'PRETRAIN');calibrate(gb,'PRETRAIN');calibrate(gf,'PRETRAIN');return (bm.seen||0)>=120;
+    return trained;
   });
 }
 function bestPlanForAsset(coin){
   return withAsset(coin,function(){
     S.capital=portfolioState().capital;
     var a=ensureAsset(coin),f=feats(),plans=[];
-    for(var hi=0;hi<H.length;hi++){var h=H[hi],m=mixed(h,f),pl=orderPlan(h,f,m);pl.h=h;pl.m=m;plans.push(pl)}
+    for(var hi=0;hi<TRADE_H.length;hi++){var h=TRADE_H[hi],m=mixed(h,f),pl=orderPlan(h,f,m);pl.h=h;pl.m=m;plans.push(pl)}
     plans.sort(function(x,y){return(y.tradeScore||-Infinity)-(x.tradeScore||-Infinity)});
     return{f:f,pl:plans[0],plans:plans};
   });
@@ -1062,7 +1066,7 @@ function subscribeNewPortfolioAssets(){
   var ws=S.hlSocket;if(!ws||ws.readyState!==1)return;
   queueSubscription({type:'allMids'});
   var list=P.universe.slice();
-  // Prioritize the two feeds required for immediate universe readiness; enrich only after every market has them.
+  // Stage 1: every market gets BBO/L2 + trades first. Stage 2: context + candles enrich the same universe.
   for(var i=0;i<list.length;i++)queueSubscription({type:'l2Book',coin:list[i]});
   for(var j=0;j<list.length;j++)queueSubscription({type:'trades',coin:list[j]});
   for(var k=0;k<list.length;k++)queueSubscription({type:'activeAssetCtx',coin:list[k]});
