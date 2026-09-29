@@ -1365,24 +1365,31 @@ function dashboard(){
   $('audit').textContent='V16 = portefeuille unique sur tout l’univers Hyperliquid. Les anciens comptes paper par horizon ne pilotent plus l’ouverture. Chaque marché est évalué sur les horizons '+TRADE_H.join('/')+' min, puis le meilleur horizon par actif est comparé aux autres actifs. Les shadow forecasts OOS sont créés même lorsque NO TRADE est affiché; à résolution, leur rendement net après frais, slippage et spread alimente la calibration globale et locale. Aucune donnée Binance n’est nécessaire à la décision. Les nouvelles positions sont limitées aux meilleures opportunités et au budget de risque agrégé; un time-stop empêche une position de monopoliser le capital. Rentabilité non présumée : elle doit être démontrée par le rendement net OOS.';
 }
 function migrateV16(){
-  if(DB.engineVersion===16)return;
-  var p=portfolioState(),oldPositions=Object.keys(p.positions||{}).length;
-  if(oldPositions){
-    p.positions={};
-    p.migration=(p.migration||[]).concat([{ts:now(),from:'V15',droppedPositions:oldPositions,reason:'V16_PORTFOLIO_RESET'}]);
-  }
-  DB.paper={};
-  DB.engineVersion=16;
-  Object.keys(DB.obs||{}).forEach(function(key){
-    var m=key.match(/^(.*)_([0-9]+)$/);if(!m)return;
-    var coin=m[1],h=+m[2],arr=DB.obs[key]||[];
-    for(var i=0;i<arr.length;i++){
-      var x=arr[i];
-      if(x&&finite(x.netRet)&&Number.isInteger(x.target)){
-        updateProfitCalibration(h,coin,x.candidate==='SHORT'?'SHORT':'LONG',x.target,x.netRet,true);
-      }
+  var p=portfolioState();
+  if(DB.engineVersion!==16){
+    var oldPositions=Object.keys(p.positions||{}).length;
+    if(oldPositions){
+      p.positions={};
+      p.migration=(p.migration||[]).concat([{ts:now(),from:'V15',droppedPositions:oldPositions,reason:'V16_PORTFOLIO_RESET'}]);
     }
-  });
+    DB.paper={};
+    DB.engineVersion=16;
+  }
+  // Rebuild realized-profit calibration idempotently from resolved OOS observations when needed.
+  if(DB.profitBackfillVersion!==1){
+    DB.profit={global:{},asset:{}};
+    Object.keys(DB.obs||{}).forEach(function(key){
+      var m=key.match(/^(.*)_([0-9]+)$/);if(!m)return;
+      var coin=m[1],h=+m[2],arr=DB.obs[key]||[];
+      for(var i=0;i<arr.length;i++){
+        var x=arr[i];
+        if(x&&finite(x.netRet)&&Number.isInteger(x.target)){
+          updateProfitCalibration(h,coin,x.candidate==='SHORT'?'SHORT':'LONG',x.target,x.netRet,true);
+        }
+      }
+    });
+    DB.profitBackfillVersion=1;
+  }
   DB.portfolio=p;
   save();
 }
