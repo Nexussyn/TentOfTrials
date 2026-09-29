@@ -413,6 +413,7 @@ function portfolioState(){
   if(!finite(p.capitalBase)||p.capitalBase<=0)p.capitalBase=S.capital;
   if(!finite(p.capital)||p.capital<=0)p.capital=p.capitalBase;
   p.peak=Math.max(finite(p.peak)?p.peak:p.capital,p.capital);
+  p.realizedNet=finite(p.realizedNet)?p.realizedNet:0;
   p.maxDD=finite(p.maxDD)?p.maxDD:0;p.fees=finite(p.fees)?p.fees:0;p.wins=p.wins||0;p.losses=p.losses||0;p.trades=p.trades||0;p.positions=p.positions||{};p.log=p.log||[];
   return p;
 }
@@ -456,7 +457,7 @@ function portfolioOpen(coin,h,f,pl){
 function portfolioSettle(coin,exit,reason,ts){
   var p=portfolioState(),pos=p.positions[coin];if(!pos||!finite(exit))return false;
   var dir=pos.direction==='LONG'?1:-1,gross=pos.size*(exit-pos.entry)*dir,fee=pos.paperFee!=null?pos.paperFee:S.fee,slip=pos.paperSlip!=null?pos.paperSlip:S.slip,fees=(Math.abs(pos.size*pos.entry)+Math.abs(pos.size*exit))*(fee/10000),slippage=(Math.abs(pos.size*pos.entry)+Math.abs(pos.size*exit))*(slip/10000),net=gross-fees-slippage;
-  p.capital+=net;p.peak=Math.max(p.peak,p.capital);p.maxDD=Math.max(p.maxDD,p.peak>0?1-p.capital/p.peak:0);p.fees+=fees+slippage;p.trades++;if(net>=0)p.wins++;else p.losses++;
+  p.capital+=net;p.realizedNet=(p.realizedNet||0)+net;p.peak=Math.max(p.peak,p.capital);p.maxDD=Math.max(p.maxDD,p.peak>0?1-p.capital/p.peak:0);p.fees+=fees+slippage;p.trades++;if(net>=0)p.wins++;else p.losses++;
   p.log.push({coin:coin,h:pos.h,ts:pos.ts,exitTs:ts||now(),direction:pos.direction,entry:pos.entry,exit:exit,sl:pos.sl,tp:pos.tp,size:pos.size,margin:pos.margin,gross:gross,fees:fees,slippage:slippage,net:net,reason:reason});
   p.log=p.log.slice(-1000);delete p.positions[coin];P.cooldown[coin]=now()+60000;DB.portfolio=p;save();return true;
 }
@@ -481,6 +482,10 @@ function updatePortfolioPositions(){
       else pos.lastTs=t;
     }
   }
+}
+function portfolioAudit(){
+  var p=portfolioState(),expected=p.capitalBase+(finite(p.realizedNet)?p.realizedNet:0),delta=p.capital-expected;
+  return{capital:p.capital,capitalBase:p.capitalBase,realizedNet:p.realizedNet||0,expected:expected,delta:delta,ok:Math.abs(delta)<0.0001,trades:p.trades,fees:p.fees};
 }
 function portfolioRealizedByCoin(p,coin){
   var sum=0,log=p&&p.log||[];
@@ -936,6 +941,7 @@ function targetThreshold(price,atr1m,h){
   return clamp(scaled,.0015,.06);
 }
 function recordForecast(h,f,m,pl){
+  var a0=ensureAsset(S.coin);if(!marketPriceConsistent(a0,S.hl.book))return false;
   var key=S.coin+'_'+h,arr=DB.pending[key]||[];DB.pending[key]=arr;
   var unresolved=arr.some(function(x){return x&&!x.paperResolved});if(unresolved)return false;
   var rec={ts:now(),h:h,coin:S.coin,p0:S.hl.price,targetThr:targetThreshold(S.hl.price,f.atr,h),spreadBps:spreadBps(f),pBase:m.base.p.slice(),pFull:m.full.p.slice(),vBase:m.base.v.slice(),vFull:m.full.v.slice(),candidate:pl.candidate,entry:finite(pl.entry)?pl.entry:S.hl.price,direction:pl.candidate,dir:pl.candidate,atr:f.atr,pair:pl.pair||null,sl:pl.sl,tp:pl.tp,rr:pl.rr,paper:false,actionable:false,gateReasons:(pl.gateReasons||[]).slice(),createdBy:'V16_UNIVERSE_SHADOW'};
@@ -1319,9 +1325,10 @@ function globalPretrainCount(h){
 }
 function renderCapital(){
   try{
-    var p=portfolioState(),all=0;for(var hi=0;hi<H.length;hi++)all+=globalStatsFor(H[hi]).n;
-    $('capitalCards').innerHTML='<div class="capitalBox" style="grid-column:1/-1"><div class="title"><b>PORTFOLIO UNIQUE · '+P.universe.length+' ACTIFS</b><span class="badge">GLOBAL OOS '+all+'</span></div><b class="'+(p.capital>=p.capitalBase?'up':'down')+'">'+nfmt(p.capital,2)+' USDC</b><div class="capitalSub">Départ '+nfmt(p.capitalBase,2)+' · réalisé '+nfmt(p.capital-p.capitalBase,2)+' · DD '+(p.maxDD*100).toFixed(2)+'% · frais '+nfmt(p.fees,2)+' · positions '+Object.keys(p.positions||{}).length+'/'+P.maxConcurrentPositions+'</div></div>'+
-      H.map(function(h){var s=globalStatsFor(h);return'<div class="capitalBox"><div class="title"><b>OOS '+hlabel(h)+'</b><span class="badge">'+s.n+' observations</span></div><b>'+ (finite(s.net)?(s.net*10000).toFixed(2)+' bps':'—') +'</b><div class="capitalSub">Brier '+nfmt(s.b,4)+' · Hit '+pct(s.hit,1)+' · calibr. profit '+profitCount(h,'LONG')+' L / '+profitCount(h,'SHORT')+' S</div></div>'}).join('');
+    var p=portfolioState(),a=portfolioAudit(),all=0;for(var hi=0;hi<H.length;hi++)all+=globalStatsFor(H[hi]).n;
+    var auditCls=a.ok?'up':'down',auditTxt=(a.ok?'RECONCILE OK':'RECONCILE ERROR')+' · écart '+a.delta.toFixed(6)+' USDC';
+    $('capitalCards').innerHTML='<div class="capitalBox" style="grid-column:1/-1"><div class="title"><b>V16.1 · CAPITAL RÉEL-ÉQUIVALENT · '+P.universe.length+' ACTIFS</b><span class="badge '+auditCls+'">'+auditTxt+'</span></div><b class="'+(p.capital>=p.capitalBase?'up':'down')+'">'+nfmt(p.capital,2)+' USDC</b><div class="capitalSub">Départ '+nfmt(p.capitalBase,2)+' · réalisé net '+nfmt(p.realizedNet,2)+' · DD '+(p.maxDD*100).toFixed(2)+'% · frais '+nfmt(p.fees,2)+' · trades '+p.trades+' · positions '+Object.keys(p.positions||{}).length+'/'+P.maxConcurrentPositions+'</div></div>'+
+      H.map(function(h){var s=globalStatsFor(h);return'<div class="capitalBox"><div class="title"><b>OOS '+hlabel(h)+'</b><span class="badge">'+s.n+' observations</span></div><b>'+ (finite(s.net)?(s.net*10000).toFixed(2)+' bps':'—') +'</b><div class="capitalSub">Brier '+nfmt(s.b,4)+' · Hit '+pct(s.hit,1)+' · calibration profit L '+profitCount(h,'LONG')+' / S '+profitCount(h,'SHORT')+'</div></div>'}).join('');
   }catch(e){$('capitalCards').innerHTML='<div class="note">Performance indisponible temporairement : '+String(e.message||e)+'</div>';}
 }
 function renderHealth(){
@@ -1379,7 +1386,7 @@ function migrateV16(){
   var oldP=portfolioState();
   DB.legacyV15=DB.legacyV15||{portfolio:oldP,profit:DB.profit||{},obs:DB.obs||{}};
   // V16.1 starts a clean real-capital accounting epoch at the configured capital.
-  DB.portfolio={capitalBase:S.capital,capital:S.capital,peak:S.capital,maxDD:0,fees:0,wins:0,losses:0,trades:0,positions:{},log:[],epoch:16.1,startedAt:now()};
+  DB.portfolio={capitalBase:S.capital,capital:S.capital,peak:S.capital,maxDD:0,realizedNet:0,fees:0,wins:0,losses:0,trades:0,positions:{},log:[],epoch:16.1,startedAt:now()};
   DB.profit={global:{},asset:{}};
   DB.obs={};
   DB.pending={};
