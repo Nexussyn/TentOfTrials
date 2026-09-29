@@ -518,17 +518,25 @@ function portfolioMark(coin){
 function bootstrapPortfolioModel(coin){
   var a=ensureAsset(coin),bars=a.hl.candles.slice(-5000),trained=0;
   return withAsset(coin,function(){
+    DB.pretrain=DB.pretrain||{};DB.pretrain[coin]=DB.pretrain[coin]||{h:{},updatedAt:0};DB.pretrain[coin].h=DB.pretrain[coin].h||{};
     for(var qi=0;qi<TRADE_H.length;qi++){
       var h=TRADE_H[qi],need=Math.min(5000,Math.max(500,h+440));if(bars.length<Math.min(need,180))continue;
       var bm=model(h,'base'),fm=model(h,'full'),gb=globalModel(h,'base'),gf=globalModel(h,'full');
-      if((bm.seen||0)>=120&&(gb.seen||0)>=120)continue;
+      var before=bm.seen||0;
+      if((bm.seen||0)>=120&&(gb.seen||0)>=120){DB.pretrain[coin].h[h]={n:Math.max(0,(bm.seen||0)-(bm.liveSeen||0)),bars:bars.length,lastTrainAt:DB.pretrain[coin].h[h]&&DB.pretrain[coin].h[h].lastTrainAt||0};continue;}
       for(var i=80;i<bars.length-h;i+=3){
         var c=bars.slice(0,i+1),clo=c.map(function(q){return q.c}),ff={r1:ret(clo,1),r5:ret(clo,5),r15:ret(clo,15),r60:ret(clo,60),ema:ema(clo.slice(-180),9)/ema(clo.slice(-180),21)-1,l2:NaN,micro:NaN,flow:NaN,absorption:NaN,funding:NaN,basis:NaN,spotPerp:NaN,doi:NaN,liq:NaN,pasr:NaN,atr:atr(c.slice(-120))};
         var rr=bars[i+h].c/bars[i].c-1,thr=targetThreshold(bars[i].c,ff.atr,h),target=labelFromReturn(rr,thr),vb=vec(ff,false),vf=vec(ff,true),z1=forecastLogits(bm,vb),z2=forecastLogits(fm,vf),z3=forecastLogits(gb,vb),z4=forecastLogits(gf,vf);
-        update(bm,target,sigmoid(z1),vb,false);update(fm,target,sigmoid(z2),vf,false);update(gb,target,sigmoid(z3),vb,false);update(gf,target,sigmoid(z4),vf,false);
+        var p1=sigmoid(z1),p2=sigmoid(z2),p3=sigmoid(z3),p4=sigmoid(z4);
+        bm.obs.push({logits:z1,target:target,source:'PRETRAIN'});fm.obs.push({logits:z2,target:target,source:'PRETRAIN'});gb.obs.push({logits:z3,target:target,source:'PRETRAIN'});gf.obs.push({logits:z4,target:target,source:'PRETRAIN'});
+        bm.obs=bm.obs.slice(-300);fm.obs=fm.obs.slice(-300);gb.obs=gb.obs.slice(-300);gf.obs=gf.obs.slice(-300);
+        update(bm,target,p1,vb,false);update(fm,target,p2,vf,false);update(gb,target,p3,vb,false);update(gf,target,p4,vf,false);
       }
-      calibrate(bm,'PRETRAIN');calibrate(fm,'PRETRAIN');calibrate(gb,'PRETRAIN');calibrate(gf,'PRETRAIN');trained++;
+      calibrate(bm,'PRETRAIN');calibrate(fm,'PRETRAIN');calibrate(gb,'PRETRAIN');calibrate(gf,'PRETRAIN');
+      var added=Math.max(0,(bm.seen||0)-before);if(added>0)trained++;
+      DB.pretrain[coin].h[h]={n:Math.max(0,(bm.seen||0)-(bm.liveSeen||0)),added:added,bars:bars.length,lastTrainAt:now()};
     }
+    DB.pretrain[coin].updatedAt=now();save();
     return trained;
   });
 }
@@ -1063,9 +1071,10 @@ async function resolve(){
           if(vb&&vf){
             var bl=forecastLogits(base,vb),fl=forecastLogits(full,vf),gbl=forecastLogits(gb,vb),gfl=forecastLogits(gf,vf);if(!bl||!fl||!gbl||!gfl)throw new Error('frozen vectors invalid');
             prB=sigmoid(bl.map(function(x){return x/(base.temp||1)}));prF=sigmoid(fl.map(function(x){return x/(full.temp||1)}));
-            base.obs.push({logits:bl,target:target,source:'LIVE'});full.obs.push({logits:fl,target:target,source:'LIVE'});base.obs=base.obs.slice(-300);full.obs=full.obs.slice(-300);
-            update(base,target,prB,vb,true);update(full,target,prF,vf,true);
-            update(gb,target,sigmoid(gbl.map(function(x){return x/(gb.temp||1)})),vb,true);update(gf,target,sigmoid(gfl.map(function(x){return x/(gf.temp||1)})),vf,true);
+            var prGB=sigmoid(gbl.map(function(x){return x/(gb.temp||1)})),prGF=sigmoid(gfl.map(function(x){return x/(gf.temp||1)}));
+            base.obs.push({logits:bl,target:target,source:'LIVE'});full.obs.push({logits:fl,target:target,source:'LIVE'});gb.obs.push({logits:gbl,target:target,source:'LIVE'});gf.obs.push({logits:gfl,target:target,source:'LIVE'});
+            base.obs=base.obs.slice(-300);full.obs=full.obs.slice(-300);gb.obs=gb.obs.slice(-300);gf.obs=gf.obs.slice(-300);
+            update(base,target,prB,vb,true);update(full,target,prF,vf,true);update(gb,target,prGB,vb,true);update(gf,target,prGF,vf,true);
             if((gf.liveSeen||0)%50===0){calibrate(gb,'LIVE');calibrate(gf,'LIVE')};if((full.liveSeen||0)%50===0){calibrate(base,'LIVE');calibrate(full,'LIVE')}
           }else{
             prB=probsNormalize(p.pBase);prF=probsNormalize(p.pFull);if(!prB||!prF)throw new Error('legacy pending record has no valid frozen probabilities');DB.legacyResolved=(DB.legacyResolved||0)+1;
@@ -1426,7 +1435,19 @@ function globalObsFor(h){
 }
 function globalStatsFor(h){return statsFromObs(globalObsFor(h))}
 function globalPretrainCount(h){
-  var n=0;Object.keys(DB.pretrain||{}).forEach(function(coin){var z=DB.pretrain[coin],x=z&&z.h&&z.h[h];if(x&&finite(x.n))n+=x.n});return n;
+  var n=0,seen={},suffix='_'+String(h);
+  Object.keys(DB.models||{}).forEach(function(key){
+    if(key.slice(-suffix.length)!==suffix)return;
+    var coin=key.slice(0,-suffix.length),m=DB.models[key]&&DB.models[key].base;
+    if(!coin||coin==='__GLOBAL__'||seen[coin])return;
+    if(m&&finite(m.seen)){n+=Math.max(0,(m.seen||0)-(m.liveSeen||0));seen[coin]=true}
+  });
+  Object.keys(DB.pretrain||{}).forEach(function(coin){
+    if(seen[coin])return;
+    var x=DB.pretrain[coin]&&DB.pretrain[coin].h&&DB.pretrain[coin].h[h];
+    if(x&&finite(x.n))n+=x.n;
+  });
+  return Math.round(n);
 }
 function renderCapital(){
   try{
@@ -1479,7 +1500,9 @@ function dashboard(){
   var fm=model(S.h,'full'),w=fm.w[2]&&fm.w[2][FEATS.indexOf('pasr')*2]||0;
   $('c4').textContent=finite(f.pasr)?f.pasr.toFixed(3):'—';$('pasrW').textContent=w.toFixed(4);$('deltaB').textContent=finite(st.delta)?st.delta.toFixed(4):'—';$('pasrN').textContent=st.n;$('pasrV').textContent=pv;$('pasrState').textContent=pv;$('bucketN').textContent=f.pasrN;
   $('hist').textContent=globalPretrainCount(S.h);$('live').textContent=globalStatsFor(S.h).n;$('brier').textContent=nfmt(globalStatsFor(S.h).b,4);$('logloss').textContent=nfmt(globalStatsFor(S.h).ll,4);$('hit').textContent=pct(globalStatsFor(S.h).hit,1);$('roll').textContent=nfmt(globalStatsFor(S.h).roll,4);$('pend').textContent=(DB.pending[S.coin+'_'+S.h]||[]).length;
-  $('learnState').textContent=globalStatsFor(S.h).n<P.minGlobalProfitObs?'CALIBRATING':globalStatsFor(S.h).net>0?'ADAPTIVE POSITIVE':'ADAPTIVE DEFENSIVE';
+  var preN=globalPretrainCount(S.h),liveN=globalStatsFor(S.h).n,gBase=globalModel(S.h,'base'),gFull=globalModel(S.h,'full');
+  $('learnState').textContent=(preN>0||liveN>0)?(liveN<P.minGlobalProfitObs?'LEARNING · OOS':'LEARNING · ADAPTIVE'):'WAITING FOR DATA';
+  $('learningNote').textContent='PRETRAIN '+preN+' · LIVE OOS '+liveN+' · global base '+(gBase.seen||0)+' updates ('+(gBase.liveSeen||0)+' live) · full '+(gFull.seen||0)+' updates ('+(gFull.liveSeen||0)+' live) · pending '+Object.keys(DB.pending||{}).reduce(function(s,k){return s+(DB.pending[k]||[]).filter(function(x){return x&&!x.paperResolved}).length},0)+'. Apprentissage fondé uniquement sur données historiques réellement chargées et prévisions OOS réellement résolues.';
   $('kPrice').textContent=nfmt(S.hl.price,2);$('kDQ').textContent=q+'/100';$('kMix').textContent='GLOBAL '+(m.globalSeen||0)+' live · LOCAL '+(model(S.h,'full').liveSeen||0)+' live · PROFIT OOS '+profitCount(S.h,dir);$('kEdge').textContent=finite(pl.blendedEvBps)?((pl.blendedEvBps>=0?'+':'')+pl.blendedEvBps.toFixed(2)+' bps'):'—';
   var ages=[S.hl.lastBook,S.hl.lastTrades,S.hl.lastCtx].filter(function(x){return x>0}).map(function(x){return Math.max(0,now()-x)/1000});$('kFresh').textContent=ages.length?Math.round(Math.max.apply(null,ages))+'s':'—';
   $('chartInfo').textContent='HL '+nfmt(S.hl.price)+' · focus dynamique '+P.focusCoin;
