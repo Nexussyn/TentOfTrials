@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Crypto Direction Engine — V14.0 NET-EV</title>
+<title>Crypto Direction Engine — V15.0 GLOBAL UNIVERSE</title>
 <style>
 :root{--bg:#061016;--p:#0c1a22;--p2:#09161d;--l:#243843;--t:#edf4f7;--m:#8ea3ad;--u:#43d19d;--d:#ff7082;--n:#f0bf55;--c:#67d7ef}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 15% 0,#122a32,#061016 42%,#050b0f);color:var(--t);font:14px/1.4 system-ui,-apple-system,Segoe UI,sans-serif}
@@ -32,11 +32,11 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
 <body>
 <header class="top">
   <div>
-    <div class="brand">CRYPTO DIRECTION ENGINE · V14.0 NET-EV</div>
+    <div class="brand">CRYPTO DIRECTION ENGINE · V15.0 GLOBAL UNIVERSE</div>
     <div class="tag">Hyperliquid primaire · Binance cross-venue · self-evaluating · persistance double · OOS résoluble après fermeture · aucune exécution réelle</div>
   </div>
   <div class="ctrl">
-    <select id="coin" title="Marché analysé"><option>BTC</option><option>ETH</option><option>SOL</option></select>
+    <select id="coin" title="Marché de focus"><option selected>AUTO</option><option>BTC</option><option>ETH</option><option>SOL</option></select>
     <select id="hor" title="Horizon de résolution de la prévision"><option value="5" selected>5m</option><option value="15">15m</option><option value="60">1h</option><option value="240">4h</option><option value="1440">1j</option></select>
     <input id="capital" type="number" value="1000" min="10" step="10" title="Capital de référence en USDC">
     <input id="risk" type="number" value="0.5" min="0.05" max="5" step="0.05" title="Risque maximum théorique par idée, en % du capital">
@@ -183,7 +183,7 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
 
 <section class="full">
 <div class="panel">
-  <div class="title"><h3>Portefeuille multi-crypto · capital mobilisable</h3><span id="portfolioBadge" class="badge">15 ACTIFS · 0/10 SLOTS</span></div>
+  <div class="title"><h3>Portefeuille multi-crypto · capital mobilisable</h3><span id="portfolioBadge" class="badge">UNIVERS DYNAMIQUE · 0 POSITION</span></div>
   <div class="kpi" style="margin-bottom:8px">
     <div class="kbox"><div class="tiny">CAPITAL</div><b id="portCapital">—</b></div>
     <div class="kbox"><div class="tiny">ENGAGÉ</div><b id="portUsed">—</b></div>
@@ -193,7 +193,7 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
   </div>
   <div id="portfolioGrid" class="portfolioGrid"></div>
   <div id="portfolioNote" class="note" style="margin-top:9px">
-    Scanner des perpétuels Hyperliquid classés par volume nominal 24 h. Jusqu'à 15 actifs surveillés et 10 positions paper simultanées. Pour chaque crypto : prix actuel, entrée, SL, TP et PnL sont affichés. Le PnL latent correspond à ce que le compte aurait après sortie au prix actuel, frais entrée + sortie estimés inclus; le réalisé additionne les trades déjà clôturés. Aucune exécution réelle.
+    Scanner tous les perpétuels Hyperliquid actuellement tradables. L'univers et le nombre de slots suivent dynamiquement la liste publique; le risque agrégé reste plafonné séparément. Pour chaque crypto : prix actuel, entrée, SL, TP et PnL sont affichés. Le PnL latent correspond à ce que le compte aurait après sortie au prix actuel, frais entrée + sortie estimés inclus; le réalisé additionne les trades déjà clôturés. Aucune exécution réelle.
   </div>
 </div>
 </section>
@@ -355,10 +355,9 @@ var S={
 
 
 var P={
-  assets:['BTC','ETH','SOL','XRP','DOGE','SUI','AVAX','LINK','AAVE','LTC','BCH','ADA','HYPE','ENA','ARB'],
-  universe:['BTC','ETH','SOL','XRP','DOGE','SUI','AVAX','LINK','AAVE','LTC','BCH','ADA','HYPE','ENA','ARB'],
-  states:{},volume:{},wsSubscribed:{},maxAssets:15,maxSlots:10,maxLeverage:5,maxMarginPct:.20,maxPortfolioRiskPct:.02,maxSameSide:4,h:5,
-  lastScan:0,lastMeta:0,lastBootstrap:0,bootstrapped:{},positions:{},cooldown:{},signalsRows:[]
+  assets:[],universe:[],states:{},volume:{},wsSubscribed:{},
+  maxAssets:Infinity,maxSlots:Infinity,maxLeverage:5,maxMarginPct:.20,maxPortfolioRiskPct:.02,maxSameSide:Infinity,
+  bootstrapConcurrency:12,bootstrapIntervalMs:60000,h:5,lastScan:0,lastMeta:0,lastBootstrap:0,bootstrapped:{},positions:{},cooldown:{},signalsRows:[]
 };
 function newAssetState(){
   return{
@@ -395,7 +394,7 @@ function portfolioRiskOpen(p){
 }
 function portfolioOpen(coin,h,f,pl){
   var p=portfolioState(),ks=Object.keys(p.positions||{}),t=now();
-  if(h!==P.h||ks.length>=P.maxSlots||p.positions[coin])return false;
+  if(h!==P.h||ks.length>=Math.max(1,P.universe.length)||p.positions[coin])return false;
   if((model(h,'base').seen||0)<120)return false;
   if(pl.direction!=='LONG'&&pl.direction!=='SHORT')return false;
   if(!finite(pl.entry)||!finite(pl.sl)||!finite(pl.tp)||!finite(f.atr)||f.atr<=0)return false;
@@ -445,18 +444,16 @@ function portfolioMark(coin){
   return{price:price,pos:pos,realized:realized,unreal:unreal,total:realized+(finite(unreal)?unreal:0)};
 }
 function bootstrapPortfolioModel(coin){
-  var h=P.h,a=ensureAsset(coin),bars=a.hl.candles.slice(-500);
-  if(bars.length<180)return false;
+  var h=P.h,a=ensureAsset(coin),bars=a.hl.candles.slice(-500);if(bars.length<180)return false;
   return withAsset(coin,function(){
-    var bm=model(h,'base'),fm=model(h,'full');
-    if((bm.seen||0)>=120)return true;
+    var bm=model(h,'base'),fm=model(h,'full'),gb=globalModel(h,'base'),gf=globalModel(h,'full');
+    if((bm.seen||0)>=120&&(gb.seen||0)>=120)return true;
     for(var i=80;i<bars.length-h;i+=3){
-      var c=bars.slice(0,i+1),clo=c.map(function(q){return q.c}),f={r1:ret(clo,1),r5:ret(clo,5),r15:ret(clo,15),r60:ret(clo,60),ema:ema(clo.slice(-180),9)/ema(clo.slice(-180),21)-1,l2:NaN,micro:NaN,flow:NaN,absorption:NaN,funding:NaN,basis:NaN,spotPerp:NaN,doi:NaN,liq:NaN,pasr:NaN,atr:atr(c.slice(-120))};
-      var r=bars[i+h].c/bars[i].c-1,thr=targetThreshold(bars[i].c,f.atr,h),target=labelFromReturn(r,thr),vb=vec(f,false),zb=forecastLogits(bm,vb),pb=sigmoid(zb),vf=vec(f,true),zf=forecastLogits(fm,vf),pf=sigmoid(zf);
-      update(bm,target,pb,vb,false);update(fm,target,pf,vf,false);
+      var c=bars.slice(0,i+1),clo=c.map(function(q){return q.c}),ff={r1:ret(clo,1),r5:ret(clo,5),r15:ret(clo,15),r60:ret(clo,60),ema:ema(clo.slice(-180),9)/ema(clo.slice(-180),21)-1,l2:NaN,micro:NaN,flow:NaN,absorption:NaN,funding:NaN,basis:NaN,spotPerp:NaN,doi:NaN,liq:NaN,pasr:NaN,atr:atr(c.slice(-120))};
+      var rr=bars[i+h].c/bars[i].c-1,thr=targetThreshold(bars[i].c,ff.atr,h),target=labelFromReturn(rr,thr),vb=vec(ff,false),vf=vec(ff,true),z1=forecastLogits(bm,vb),z2=forecastLogits(fm,vf),z3=forecastLogits(gb,vb),z4=forecastLogits(gf,vf);
+      update(bm,target,sigmoid(z1),vb,false);update(fm,target,sigmoid(z2),vf,false);update(gb,target,sigmoid(z3),vb,false);update(gf,target,sigmoid(z4),vf,false);
     }
-    calibrate(bm,'PRETRAIN');calibrate(fm,'PRETRAIN');
-    return (bm.seen||0)>=120;
+    calibrate(bm,'PRETRAIN');calibrate(fm,'PRETRAIN');calibrate(gb,'PRETRAIN');calibrate(gf,'PRETRAIN');return (bm.seen||0)>=120;
   });
 }
 function portfolioScan(){
@@ -489,9 +486,9 @@ function renderPortfolio(){
   $('portCapital').textContent=nfmt(p.capital,2)+' USDC';
   $('portUsed').textContent=nfmt(used,2)+' USDC';
   $('portFree').textContent=nfmt(free,2)+' USDC';
-  $('portSlots').textContent=ks.length+' / '+P.maxSlots;
+  $('portSlots').textContent=ks.length+' / '+Math.max(1,P.universe.length);
   $('portRisk').textContent=nfmt(risk,2)+' USDC';
-  $('portfolioBadge').textContent=P.universe.length+' ACTIFS · '+ks.length+'/'+P.maxSlots+' SLOTS';
+  $('portfolioBadge').textContent=P.universe.length+' ACTIFS TRADABLES · '+ks.length+' POSITIONS';
   var html='<div class="portfolioRow header"><div>Actif</div><div>Prix</div><div>Signal</div><div>Prob.</div><div>Entrée</div><div>SL</div><div>TP</div><div>PnL total</div><div>PnL latent</div><div>Réalisé</div><div>Edge</div><div>État</div></div>';
   for(var i=0;i<rows.length;i++){
     var q=rows[i],cls=q.action==='LONG'?'up':q.action==='SHORT'?'down':'neu',pcls=finite(q.pnl)?(q.pnl>=0?'up':'down'):'neu',ucls=finite(q.unreal)?(q.unreal>=0?'up':'down'):'neu',rcls=finite(q.realized)?(q.realized>=0?'up':'down'):'neu',st=q.pos?'POSITION':q.action==='CHARGEMENT'?'DONNÉES':'SURVEILLE';
@@ -500,7 +497,8 @@ function renderPortfolio(){
   $('portfolioGrid').innerHTML=html;
 }
 function newM(){return{w:Array.from({length:3},function(){return Array(30).fill(0)}),b:[0,0,0],seen:0,liveSeen:0,temp:1,obs:[]}}
-function model(h,k){var key=S.coin+'_'+h;if(!DB.models[key])DB.models[key]={base:newM(),full:newM()};var m=DB.models[key][k]||newM();if(!m.w||m.w.length!==3||m.w.some(function(row){return !row||row.length!==30})){var oldW=m.w||[];m.w=Array.from({length:3},function(_,i){var row=(oldW[i]||[]).slice(0,30);while(row.length<30)row.push(0);return row});m.b=m.b||[0,0,0];m.seen=m.seen||0;m.liveSeen=m.liveSeen==null?((DB.obs[key]||[]).length):m.liveSeen;m.temp=m.temp||1;m.obs=m.obs||[]}DB.models[key][k]=m;return m}
+function model(h,k,scope){var key=(scope||S.coin)+'_'+h;if(!DB.models[key])DB.models[key]={base:newM(),full:newM()};var m=DB.models[key][k]||newM();if(!m.w||m.w.length!==3||m.w.some(function(row){return !row||row.length!==30})){var oldW=m.w||[];m.w=Array.from({length:3},function(_,i){var row=(oldW[i]||[]).slice(0,30);while(row.length<30)row.push(0);return row});m.b=m.b||[0,0,0];m.seen=m.seen||0;m.liveSeen=m.liveSeen==null?0:m.liveSeen;m.temp=m.temp||1;m.obs=m.obs||[]}DB.models[key][k]=m;return m}
+function globalModel(h,k){return model(h,k,'__GLOBAL__')}
 function sigmoid(z){var m=Math.max.apply(null,z),e=z.map(function(v){return Math.exp(clamp(v-m,-30,30))}),s=e.reduce(function(a,b){return a+b},0);return e.map(function(v){return v/s})}
 function ema(a,n){if(!a.length)return NaN;var e=a[0],k=2/(n+1);for(var i=1;i<a.length;i++)e=a[i]*k+e*(1-k);return e}
 function ret(a,n){return a.length>n?a[a.length-1]/a[a.length-1-n]-1:NaN}
@@ -576,8 +574,8 @@ function vec(f,full){
   }
   return v;
 }
-function pred(h,f,k){
-  var m=model(h,k),ff=Object.assign({},f);
+function pred(h,f,k,scope){
+  var m=model(h,k,scope),ff=Object.assign({},f);
   if(k==='full'&&finite(ff.pasr)){
     var pv=pasrVerdict(h),exposure=pv==='HELPING'?1:pv==='HURTING'?0:.25;
     ff.pasr*=exposure;
@@ -607,11 +605,14 @@ function evidenceProb(f){
 }
 function safeProb(x){return finite(x)?x:1/3}
 function mixed(h,f){
-  var base=pred(h,f,'base'),full=pred(h,f,'full'),ev=evidenceProb(f),fs=full.m.liveSeen||0;
-  var alpha=clamp((fs-10)/290,0,1),modelP=base.p.map(function(x,i){return x*(1-alpha)+full.p[i]*alpha});
-  var ew=clamp(.68-.00045*fs,.30,.68);
-  var p=modelP.map(function(x,i){return x*(1-ew)+ev[i]*ew}),s=p.reduce(function(a,b){return a+b},0);
-  return{base:base,full:full,evidence:ev,alpha:alpha,evidenceWeight:ew,p:p.map(function(x){return x/s}),score:evidenceScore(f)};
+  var lb=pred(h,f,'base'),lf=pred(h,f,'full'),gb=pred(h,f,'base','__GLOBAL__'),gf=pred(h,f,'full','__GLOBAL__'),ev=evidenceProb(f);
+  var ls=lf.m.liveSeen||0,gs=gf.m.liveSeen||0,localWeight=clamp((ls-20)/180,0,.70),globalFullWeight=clamp(.35+gs/1200,.35,.75);
+  var baseP=gb.p.map(function(x,i){return x*(1-localWeight)+lb.p[i]*localWeight});
+  var fullP=gf.p.map(function(x,i){return x*(1-localWeight)+lf.p[i]*localWeight});
+  var modelP=baseP.map(function(x,i){return x*(1-globalFullWeight)+fullP[i]*globalFullWeight});
+  var ew=clamp(.12-.00012*gs,.025,.12);
+  var p=modelP.map(function(x,i){return x*(1-ew)+ev[i]*ew}),sum=p.reduce(function(a,b){return a+b},0);
+  return{base:lb,full:lf,globalBase:gb,globalFull:gf,evidence:ev,alpha:localWeight,evidenceWeight:ew,p:p.map(function(x){return x/sum}),score:evidenceScore(f),globalSeen:gs};
 }
 function dataQuality(f){
   var checks=[
@@ -793,45 +794,37 @@ function targetThreshold(price,atr1m,h){
   return clamp(scaled,.0015,.06);
 }
 function recordForecast(h,f,m,pl){
-  var key=S.coin+'_'+h,arr=DB.pending[key]||[],pstate=paperState(h);
-  DB.pending[key]=arr;
+  var key=S.coin+'_'+h,arr=DB.pending[key]||[],pstate=paperState(h);DB.pending[key]=arr;
+  var unresolved=arr.some(function(x){return x&&!x.paperResolved&&now()<x.ts+h*60000});if(unresolved)return false;
   var actionable=(pl.direction==='LONG'||pl.direction==='SHORT')&&finite(pl.entry)&&finite(pl.sl)&&finite(pl.tp)&&!pstate.position&&!paperPendingExists(h);
-  var rec={ts:now(),h:h,coin:S.coin,p0:S.hl.price,paperCapital:S.capital,paperRisk:S.risk,paperFee:S.fee,targetThr:targetThreshold(S.hl.price,f.atr,h),spreadBps:spreadBps(f),paperSlip:S.slip,
-    pBase:m.base.p.slice(),pFull:m.full.p.slice(),vBase:m.base.v.slice(),vFull:m.full.v.slice(),candidate:pl.candidate,entry:finite(pl.entry)?pl.entry:S.hl.price,
-    direction:pl.direction,dir:pl.direction,atr:f.atr,pair:pl.pair||null,sl:pl.sl,tp:pl.tp,rr:pl.rr,paper:false};
+  var rec={ts:now(),h:h,coin:S.coin,p0:S.hl.price,paperCapital:S.capital,paperRisk:S.risk,paperFee:S.fee,paperSlip:S.slip,targetThr:targetThreshold(S.hl.price,f.atr,h),spreadBps:spreadBps(f),pBase:m.base.p.slice(),pFull:m.full.p.slice(),vBase:m.base.v.slice(),vFull:m.full.v.slice(),candidate:pl.candidate,entry:finite(pl.entry)?pl.entry:S.hl.price,direction:pl.direction,dir:pl.direction,atr:f.atr,pair:pl.pair||null,sl:pl.sl,tp:pl.tp,rr:pl.rr,paper:false,actionable:false};
   if(actionable){
-    var riskDist=Math.abs(pl.entry-pl.sl),riskCash=pstate.capital*(rec.paperRisk)/100;
-    var feePerUnit=(finite(pl.entry)&&finite(pl.sl)?(Math.abs(pl.entry)+Math.abs(pl.sl))*(rec.paperFee/10000)+(Math.abs(pl.entry)+Math.abs(pl.sl))*(rec.paperSlip/10000)+Math.abs(pl.entry)*(finite(rec.spreadBps)?rec.spreadBps:0)/10000:NaN),sz=riskDist>0&&finite(feePerUnit)?riskCash/(riskDist+feePerUnit):NaN;
-    if(finite(sz)&&sz>0){
-      rec.paper=true;rec.size=sz;
-      pstate.position={ts:rec.ts,direction:rec.direction,entry:rec.entry,sl:rec.sl,tp:rec.tp,size:sz,paperFee:rec.paperFee,paperSlip:rec.paperSlip,spreadBps:rec.spreadBps,lastTs:rec.ts,closed:false};
-      save();
-    }
+    var riskDist=Math.abs(pl.entry-pl.sl),riskCash=pstate.capital*(rec.paperRisk)/100,feePerUnit=(finite(pl.entry)&&finite(pl.sl)?(Math.abs(pl.entry)+Math.abs(pl.sl))*(rec.paperFee/10000)+(Math.abs(pl.entry)+Math.abs(pl.sl))*(rec.paperSlip/10000)+Math.abs(pl.entry)*(finite(rec.spreadBps)?rec.spreadBps:0)/10000:NaN),sz=riskDist>0&&finite(feePerUnit)?riskCash/(riskDist+feePerUnit):NaN;
+    if(finite(sz)&&sz>0){rec.paper=true;rec.actionable=true;rec.size=sz;pstate.position={ts:rec.ts,direction:rec.direction,entry:rec.entry,sl:rec.sl,tp:rec.tp,size:sz,paperFee:rec.paperFee,paperSlip:rec.paperSlip,spreadBps:rec.spreadBps,lastTs:rec.ts,closed:false};save()}
   }
-  rec.actionable=actionable;
-  DB.pending[key].push(rec);
-  var maxPending=Math.max(300,Math.min(5000,Math.ceil(h*1.5)));
-  DB.pending[key]=DB.pending[key].slice(-maxPending);save();
+  DB.pending[key].push(rec);var maxPending=Math.max(60,Math.min(400,Math.ceil(h*1.5)));DB.pending[key]=DB.pending[key].slice(-maxPending);save();return true;
 }
-function localPath(t0,h){
-  var due=t0+h*60000,tick=S.tape.filter(function(x){return x.t>=t0-2000&&x.t<=due+2000&&finite(x.p)});
+function forecastAllUniverse(){
+  var list=P.universe.slice(),created=0;
+  for(var ci=0;ci<list.length;ci++){var coin=list[ci];withAsset(coin,function(){for(var hi=0;hi<H.length;hi++){var h=H[hi],f=feats(),m=mixed(h,f),pl=orderPlan(h,f,m);if(recordForecast(h,f,m,pl)!==false)created++}})}
+  return created;
+}
+function localPath(t0,h,coin){
+  var a=coin?ensureAsset(coin):ensureAsset(S.coin),tape=a.tape,candles=a.hl.candles,due=t0+h*60000;
+  var tick=tape.filter(function(x){return x.t>=t0-2000&&x.t<=due+2000&&finite(x.p)});
   if(tick.length>=3&&tick[0].t<=t0+5000&&tick[tick.length-1].t>=due-5000)return{mode:'TICK',items:tick};
-  var first=Math.ceil(t0/60000)*60000;
-  var bars=S.hl.candles.filter(function(x){return x.t>=first&&x.t<=due+60000});
-  if(bars.length>=Math.max(2,Math.min(120,h)))return{mode:'CANDLE',items:bars};
-  return null;
+  var first=Math.ceil(t0/60000)*60000,bars=candles.filter(function(x){return x.t>=first&&x.t<=due+60000});
+  if(bars.length>=Math.max(2,Math.min(120,h)))return{mode:'CANDLE',items:bars};return null;
 }
-async function fetchPath(t0,h){
-  var local=localPath(t0,h);if(local)return local;
+async function fetchPath(t0,h,coin){
+  var local=localPath(t0,h,coin);if(local)return local;
   var due=t0+h*60000,start=Math.max(0,t0-60000),end=due+120000;
   try{
-    var res=await hl({type:'candleSnapshot',req:{coin:S.coin,interval:'1m',startTime:start,endTime:end}});
+    var res=await hl({type:'candleSnapshot',req:{coin:coin||S.coin,interval:'1m',startTime:start,endTime:end}});
     var bars=(res||[]).map(function(q){return{t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v}}).sort(function(a,b){return a.t-b.t});
-    var first=Math.ceil(t0/60000)*60000;
-    bars=bars.filter(function(x){return x.t>=first&&x.t<=due+60000});
+    var first=Math.ceil(t0/60000)*60000;bars=bars.filter(function(x){return x.t>=first&&x.t<=due+60000});
     if(bars.length)return{mode:'CANDLE',items:bars};
-  }catch(e){}
-  return null;
+  }catch(e){}return null;
 }
 function endpointPrice(path,t0,h){
   if(!path||!path.items||!path.items.length)return null;
@@ -846,8 +839,8 @@ function endpointPrice(path,t0,h){
   if(!bestC)bestC=path.items[0];
   return{t:bestC.t+60000,p:bestC.c};
 }
-function pathPriceAt(t0,h,path){
-  return endpointPrice(path||localPath(t0,h),t0,h);
+function pathPriceAt(t0,h,path,coin){
+  return endpointPrice(path||localPath(t0,h,coin),t0,h);
 }
 function pathBetween(t0,h){return localPath(t0,h)}
 function learnGrid(h,p,pathObj){
@@ -875,51 +868,30 @@ var resolving=false;
 async function resolve(){
   if(resolving)return;resolving=true;
   try{
-    for(var hi=0;hi<H.length;hi++){
-      var h=H[hi],key=S.coin+'_'+h,a=DB.pending[key]||[],keep=[];
+    var keys=Object.keys(DB.pending||{});
+    for(var ki=0;ki<keys.length;ki++){
+      var key=keys[ki],a=DB.pending[key]||[],keep=[];
       for(var i=0;i<a.length;i++){
-        var p=a[i],due=p.ts+h*60000;
+        var p=a[i],h=+p.h||5,coin=p.coin||key.split('_')[0],due=p.ts+h*60000;
         if(now()<due-1500){keep.push(p);continue}
         try{
-          var path=await fetchPath(p.ts,h),at=path&&pathPriceAt(p.ts,h,path);
-          if(!at){
-            if(now()-p.ts>7*86400000)DB.expired=(DB.expired||0)+1;
-            else keep.push(p);
-            continue;
-          }
-          var r=at.p/p.p0-1,target=labelFromReturn(r,finite(p.targetThr)?p.targetThr:targetThreshold(p.p0,p.atr,h)),sgn=p.candidate==='LONG'?1:-1,netRet=sgn*(at.p-p.entry)/(p.entry||p.p0)-((2*(p.paperFee!=null?p.paperFee:S.fee)+2*(p.paperSlip!=null?p.paperSlip:S.slip)+(finite(p.spreadBps)?p.spreadBps:0))/10000);
-          var base=model(h,'base'),full=model(h,'full'),vb=safeVector(p.vBase,30),vf=safeVector(p.vFull,30),prB=null,prF=null;
+          var path=await fetchPath(p.ts,h,coin),at=path&&pathPriceAt(p.ts,h,path,coin);
+          if(!at){if(now()-p.ts>7*86400000)DB.expired=(DB.expired||0)+1;else keep.push(p);continue}
+          var r=at.p/p.p0-1,target=labelFromReturn(r,finite(p.targetThr)?p.targetThr:targetThreshold(p.p0,p.atr,h)),costBps=2*(p.paperFee!=null?p.paperFee:S.fee)+2*(p.paperSlip!=null?p.paperSlip:S.slip)+(finite(p.spreadBps)?p.spreadBps:0),sgn=p.candidate==='LONG'?1:-1,netRet=sgn*(at.p-p.entry)/(p.entry||p.p0)-costBps/10000;
+          var base=model(h,'base',coin),full=model(h,'full',coin),gb=globalModel(h,'base'),gf=globalModel(h,'full'),vb=safeVector(p.vBase,30),vf=safeVector(p.vFull,30),prB=null,prF=null;
           if(vb&&vf){
-            var baseLog=forecastLogits(base,vb),fullLog=forecastLogits(full,vf);
-            if(!baseLog||!fullLog)throw new Error('frozen vectors invalid');
-            prB=sigmoid(baseLog.map(function(x){return x/(base.temp||1)}));
-            prF=sigmoid(fullLog.map(function(x){return x/(full.temp||1)}));
-            base.obs.push({logits:baseLog,target:target,source:'LIVE'});
-            full.obs.push({logits:fullLog,target:target,source:'LIVE'});
-            base.obs=base.obs.slice(-300);full.obs=full.obs.slice(-300);
+            var bl=forecastLogits(base,vb),fl=forecastLogits(full,vf),gbl=forecastLogits(gb,vb),gfl=forecastLogits(gf,vf);if(!bl||!fl||!gbl||!gfl)throw new Error('frozen vectors invalid');
+            prB=sigmoid(bl.map(function(x){return x/(base.temp||1)}));prF=sigmoid(fl.map(function(x){return x/(full.temp||1)}));
+            base.obs.push({logits:bl,target:target,source:'LIVE'});full.obs.push({logits:fl,target:target,source:'LIVE'});base.obs=base.obs.slice(-300);full.obs=full.obs.slice(-300);
             update(base,target,prB,vb,true);update(full,target,prF,vf,true);
-            calibrate(base,'LIVE');calibrate(full,'LIVE');
+            update(gb,target,sigmoid(gbl.map(function(x){return x/(gb.temp||1)})),vb,true);update(gf,target,sigmoid(gfl.map(function(x){return x/(gf.temp||1)})),vf,true);
+            if((gf.liveSeen||0)%50===0){calibrate(gb,'LIVE');calibrate(gf,'LIVE')};if((full.liveSeen||0)%50===0){calibrate(base,'LIVE');calibrate(full,'LIVE')}
           }else{
-            // Compatibility with V13.4 pending records created before the vector-safety fix.
-            // Their frozen probabilities are valid for scoring but missing vectors cannot be
-            // reconstructed without inventing data, so the weights are not updated.
-            prB=probsNormalize(p.pBase);prF=probsNormalize(p.pFull);
-            if(!prB||!prF)throw new Error('legacy pending record has no valid frozen probabilities');
-            DB.legacyResolved=(DB.legacyResolved||0)+1;
+            prB=probsNormalize(p.pBase);prF=probsNormalize(p.pFull);if(!prB||!prF)throw new Error('legacy pending record has no valid frozen probabilities');DB.legacyResolved=(DB.legacyResolved||0)+1;
           }
-          if(!DB.obs[key])DB.obs[key]=[];
-          DB.obs[key].push({ts:p.ts,target:target,pb:prB,pf:prF,netRet:finite(netRet)?netRet:NaN,source:vb&&vf?'LIVE':'LEGACY'});
-          DB.obs[key]=DB.obs[key].slice(-500);
-          if(p.paper){
-            learnGrid(h,p,path);
-            var led=paperState(h);
-            if(led.position&&led.position.ts===p.ts)settlePaperPosition(h,led.position,at.p,'HORIZON',at.t);
-          }
-        }catch(e){
-          diagError('RESOLVE_'+h+'_'+i,e);
-          if(now()-p.ts>10*60000)DB.resolvedErrors=(DB.resolvedErrors||0)+1;
-          else keep.push(p);
-        }
+          if(!DB.obs[key])DB.obs[key]=[];DB.obs[key].push({ts:p.ts,target:target,pb:prB,pf:prF,netRet:finite(netRet)?netRet:NaN,actionable:p.actionable===true,source:vb&&vf?'LIVE':'LEGACY'});DB.obs[key]=DB.obs[key].slice(-150);
+          if(p.paper){withAsset(coin,function(){learnGrid(h,p,path);var led=paperState(h);if(led.position&&led.position.ts===p.ts)settlePaperPosition(h,led.position,at.p,'HORIZON',at.t)})}
+        }catch(e){diagError('RESOLVE_'+coin+'_'+h+'_'+i,e);if(now()-p.ts>10*60000)DB.resolvedErrors=(DB.resolvedErrors||0)+1;else keep.push(p)}
       }
       DB.pending[key]=keep;
     }
@@ -947,20 +919,24 @@ async function hl(body){
 function updatePortfolioUniverse(ctx){
   if(!ctx||!ctx[0]||!Array.isArray(ctx[0].universe))return;
   var u=ctx[0].universe,ac=Array.isArray(ctx[1])?ctx[1]:[],rank=[];
-  for(var i=0;i<u.length;i++){var name=u[i]&&u[i].name,x=ac[i]||{},vol=+x.dayNtlVlm;if(name&&finite(vol))rank.push({coin:name,vol:vol,oi:+x.openInterest,funding:+x.funding})}
+  for(var i=0;i<u.length;i++){
+    var meta=u[i]||{},name=meta.name,x=ac[i]||{},vol=+x.dayNtlVlm,lev=+meta.maxLeverage;
+    if(name&&meta.isDelisted!==true&&(!finite(lev)||lev>0))rank.push({coin:name,vol:finite(vol)?vol:0,oi:+x.openInterest,funding:+x.funding});
+  }
   rank.sort(function(a,b){return b.vol-a.vol});
-  var wanted=[S.coin].concat(rank.map(function(x){return x.coin})),next=[],seen={};
-  for(var j=0;j<wanted.length&&next.length<P.maxAssets;j++){var coin=wanted[j];if(!coin||seen[coin])continue;seen[coin]=true;next.push(coin);ensureAsset(coin)}
-  P.universe=next.slice(0,P.maxAssets);P.volume={};
-  for(var k=0;k<rank.length;k++){P.volume[rank[k].coin]=rank[k].vol;var a=ensureAsset(rank[k].coin);if(finite(rank[k].oi))a.hl.oi=rank[k].oi;if(finite(rank[k].funding))a.hl.funding=rank[k].funding;a.hl.lastCtx=now()}
-  P.lastMeta=now();if(S.hlSocket&&S.hlSocket.readyState===1)subscribeNewPortfolioAssets();
+  var next=[],seen={};
+  for(var j=0;j<rank.length;j++){var coin=rank[j].coin;if(!coin||seen[coin])continue;seen[coin]=true;next.push(coin);ensureAsset(coin)}
+  P.universe=next;P.assets=next.slice();P.volume={};
+  for(var k=0;k<rank.length;k++){P.volume[rank[k].coin]=rank[k].vol;var a=ensureAsset(rank[k].coin);if(finite(rank[k].oi))a.hl.oi=rank[k].oi;if(finite(rank[k].funding))a.hl.funding=rank[k].funding;if(!a.hl.lastCtx)a.hl.lastCtx=now()}
+  P.maxSlots=Math.max(1,P.universe.length);P.maxAssets=P.universe.length;P.lastMeta=now();
+  if(S.hlSocket&&S.hlSocket.readyState===1)subscribeNewPortfolioAssets();
 }
 function subscribeNewPortfolioAssets(){
   var ws=S.hlSocket;if(!ws||ws.readyState!==1)return;
   var list=P.universe.slice(),subs=[],seen=P.wsSubscribed||{};P.wsSubscribed=seen;
   for(var i=0;i<list.length;i++){var coin=list[i];if(seen[coin])continue;seen[coin]=true;subs.push({type:'l2Book',coin:coin},{type:'trades',coin:coin},{type:'candle',coin:coin,interval:'1m'},{type:'activeAssetCtx',coin:coin})}
   var cur=0;
-  function sendBatch(){if(ws.readyState!==1)return;var n=0;while(cur<subs.length&&n<4){try{ws.send(JSON.stringify({method:'subscribe',subscription:subs[cur++]}))}catch(e){}n++}if(cur<subs.length)setTimeout(sendBatch,100)}
+  function sendBatch(){if(ws.readyState!==1)return;var n=0;while(cur<subs.length&&n<16){try{ws.send(JSON.stringify({method:'subscribe',subscription:subs[cur++]}))}catch(e){}n++}if(cur<subs.length)setTimeout(sendBatch,100)}
   sendBatch();
 }
 async function restSync(){
@@ -1054,22 +1030,18 @@ function restSpot(){
   }).catch(function(){S.feed.BN_SPOT='STALE'});
 }
 async function portfolioBootstrap(){
-  var t=now();if(P.lastBootstrap&&t-P.lastBootstrap<15000)return{done:0,assets:P.universe.length};
-  P.lastBootstrap=t;var list=P.universe.slice(),done=0;
-  for(var start=0;start<list.length;start+=5){
-    await Promise.all(list.slice(start,start+5).map(async function(coin){
-      var a=ensureAsset(coin);if(a.hl.candles.length>=80)return;
+  var t=now();if(P.lastBootstrap&&t-P.lastBootstrap<P.bootstrapIntervalMs)return{done:0,assets:P.universe.length};P.lastBootstrap=t;
+  var list=P.universe.slice(),done=0,cc=Math.max(1,P.bootstrapConcurrency);
+  for(var start=0;start<list.length;start+=cc){
+    await Promise.all(list.slice(start,start+cc).map(async function(coin){
+      var a=ensureAsset(coin);if(a.hl.candles.length>=180)return;
       try{
         var end=now()-60000,res=await hl({type:'candleSnapshot',req:{coin:coin,interval:'1m',startTime:end-500*60000,endTime:end}});
-        if(Array.isArray(res)&&res.length>=80){
-          a.hl.candles=res.map(function(q){return{t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v}}).sort(function(x,y){return x.t-y.t}).slice(-1000);
-          if(!finite(a.hl.price))a.hl.price=a.hl.candles[a.hl.candles.length-1].c;
-          a.feed.HL_CANDLE='OK';P.bootstrapped[coin]=t;done++;
-        }
+        if(Array.isArray(res)&&res.length>=80){a.hl.candles=res.map(function(q){return{t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v}}).sort(function(x,y){return x.t-y.t}).slice(-1000);if(!finite(a.hl.price))a.hl.price=a.hl.candles[a.hl.candles.length-1].c;a.feed.HL_CANDLE='OK';P.bootstrapped[coin]=t;done++}
       }catch(e){}
     }));
   }
-  for(var mi=0;mi<list.length;mi++){var cc=list[mi],aa=ensureAsset(cc);if(aa.hl.candles.length>=180)try{bootstrapPortfolioModel(cc)}catch(e){}}
+  for(var mi=0;mi<list.length;mi++){var c2=list[mi],a2=ensureAsset(c2);if(a2.hl.candles.length>=180)try{bootstrapPortfolioModel(c2)}catch(e){}}
   if(done)save();return{done:done,assets:list.length};
 }
 async function warmStart(){
@@ -1165,7 +1137,7 @@ function dashboard(){
   $('c4').textContent=finite(f.pasr)?f.pasr.toFixed(3):'—';$('pasrW').textContent=w.toFixed(4);$('deltaB').textContent=finite(st.delta)?st.delta.toFixed(4):'—';$('pasrN').textContent=st.n;$('pasrV').textContent=pv;$('pasrState').textContent=pv;$('bucketN').textContent=f.pasrN;
   $('hist').textContent=(DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[S.h]&&DB.pretrain[S.coin].h[S.h].n)||0;$('live').textContent=st.n;$('brier').textContent=nfmt(st.b,4);$('logloss').textContent=nfmt(st.ll,4);$('hit').textContent=pct(st.hit,1);$('roll').textContent=nfmt(st.roll,4);$('pend').textContent=(DB.pending[S.coin+'_'+S.h]||[]).length;
   $('learnState').textContent=st.n<30?'LEARNING':st.n<100?'CALIBRATING': 'ADAPTIVE';
-  $('kPrice').textContent=nfmt(S.hl.price,2);$('kDQ').textContent=q+'/100';$('kMix').textContent=Math.round(m.alpha*100)+'% FULL · '+(model(S.h,'full').liveSeen||0)+' live';$('kEdge').textContent=finite(pl.edge)?((pl.edge>=0?'+':'')+(pl.edge*100).toFixed(1)+' pt'):'—';var ages=[S.hl.lastBook,S.hl.lastTrades,S.bn.lastPerp,S.bn.lastMark].filter(function(x){return x>0}).map(function(x){return Math.max(0,now()-x)/1000});$('kFresh').textContent=ages.length?Math.round(Math.max.apply(null,ages))+'s':'—';
+  $('kPrice').textContent=nfmt(S.hl.price,2);$('kDQ').textContent=q+'/100';$('kMix').textContent='GLOBAL '+(m.globalSeen||0)+' live · LOCAL '+(model(S.h,'full').liveSeen||0)+' live';$('kEdge').textContent=finite(pl.edge)?((pl.edge>=0?'+':'')+(pl.edge*100).toFixed(1)+' pt'):'—';var ages=[S.hl.lastBook,S.hl.lastTrades,S.bn.lastPerp,S.bn.lastMark].filter(function(x){return x>0}).map(function(x){return Math.max(0,now()-x)/1000});$('kFresh').textContent=ages.length?Math.round(Math.max.apply(null,ages))+'s':'—';
   $('chartInfo').textContent='HL '+nfmt(S.hl.price)+' · BN '+nfmt(S.bn.price);try{renderCapital()}catch(e){} try{renderPortfolio()}catch(e){} try{renderHealth()}catch(e){} try{journal()}catch(e){} $('audit').textContent='CAPITAL PAPER = une simulation indépendante par horizon, une seule position active à la fois; sizing au risque '+S.risk+'% de l\'equity, entry/SL/TP enregistrés à t0, sizing incluant stop + commissions + slippage + spread, frais '+S.fee+' bps/side, slippage '+S.slip+' bps/side, funding exclu. Le signal privilégie le modèle appris; l’evidence manuelle reste un faible prior et le PASR est exposé progressivement puis désactivé s’il est statistiquement défavorable. PRETRAIN prix = '+((DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[S.h]&&DB.pretrain[S.coin].h[S.h].n)||0)+' labels pour '+hlabel(S.h)+'; non présenté comme OOS full. LIVE OOS = prévision gelée à t0 puis résolue au prix observé à t0+h. BASE exclut les features microstructurelles/PASR; FULL les apprend en live. PASR = feature expérimentale, verdict par différence Brier appariée + IC approximatif à 95 %. Warm-start ne réinitialise plus le live.';
 }
 function syntheticState(){
@@ -1195,7 +1167,7 @@ function assertSelfTest(){
 async function boot(){
   try{
     stage('BOOT');
-    S.coin=$('coin').value;S.h=+$('hor').value;S.capital=+$('capital').value||1000;S.risk=+$('risk').value||.5;S.fee=+$('fee').value||0;S.slip=+$('slip').value||1.5;
+    S.coin=$('coin').value==='AUTO'?'BTC':$('coin').value;S.h=+$('hor').value;S.capital=+$('capital').value||1000;S.risk=+$('risk').value||.5;S.fee=+$('fee').value||0;S.slip=+$('slip').value||1.5;
     for(var pi=0;pi<H.length;pi++)paperState(H[pi]);
     var _pp=portfolioState();if(!finite(_pp.capital)||_pp.capital<=0)_pp.capital=S.capital;if(!finite(_pp.capitalBase)||_pp.capitalBase<=0)_pp.capitalBase=S.capital;DB.portfolio=_pp;
     dashboard();
@@ -1249,7 +1221,7 @@ $('capital').oninput=function(){S.capital=+$('capital').value||1000};
 $('risk').oninput=function(){S.risk=+$('risk').value||.5};
 $('fee').oninput=function(){S.fee=+$('fee').value||0};
 $('slip').oninput=function(){S.slip=+$('slip').value||0};
-$('relearn').onclick=function(){var key=S.coin;DB.pretrain[key]=undefined;H.forEach(function(h){DB.models[S.coin+'_'+h]=undefined});save();warmStart().then(function(){dashboard()}).catch(function(e){diagError('RELEARN',e)})};
+$('relearn').onclick=function(){var key=S.coin;DB.pretrain[key]=undefined;H.forEach(function(h){DB.models[S.coin+'_'+h]=undefined;DB.models['__GLOBAL___'+h]=undefined});save();warmStart().then(function(){dashboard()}).catch(function(e){diagError('RELEARN',e)})};
 boot();
 </script>
 </body>
