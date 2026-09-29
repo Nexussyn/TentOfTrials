@@ -804,7 +804,7 @@ function targetThreshold(price,atr1m,h){
 }
 function recordForecast(h,f,m,pl){
   var key=S.coin+'_'+h,arr=DB.pending[key]||[],pstate=paperState(h);DB.pending[key]=arr;
-  var unresolved=arr.some(function(x){return x&&!x.paperResolved&&now()<x.ts+h*60000});if(unresolved)return false;
+  var unresolved=arr.some(function(x){return x&&!x.paperResolved});if(unresolved)return false;
   var actionable=(pl.direction==='LONG'||pl.direction==='SHORT')&&finite(pl.entry)&&finite(pl.sl)&&finite(pl.tp)&&!pstate.position&&!paperPendingExists(h);
   var rec={ts:now(),h:h,coin:S.coin,p0:S.hl.price,paperCapital:S.capital,paperRisk:S.risk,paperFee:S.fee,paperSlip:S.slip,targetThr:targetThreshold(S.hl.price,f.atr,h),spreadBps:spreadBps(f),pBase:m.base.p.slice(),pFull:m.full.p.slice(),vBase:m.base.v.slice(),vFull:m.full.v.slice(),candidate:pl.candidate,entry:finite(pl.entry)?pl.entry:S.hl.price,direction:pl.direction,dir:pl.direction,atr:f.atr,pair:pl.pair||null,sl:pl.sl,tp:pl.tp,rr:pl.rr,paper:false,actionable:false};
   if(actionable){
