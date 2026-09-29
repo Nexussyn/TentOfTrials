@@ -428,8 +428,7 @@ function portfolioRiskOpen(p){
 }
 function portfolioOpen(coin,h,f,pl){
   var reject=function(reason){P.lastOpenRejects[coin]=reason;return false},p=portfolioState(),ks=Object.keys(p.positions||{}),t=now(),a=ensureAsset(coin);
-  if(h!==P.h)return reject('HORIZON');
-  if(ks.length>=Math.max(1,P.universe.length))return reject('SLOTS');
+  if(ks.length>=P.maxConcurrentPositions)return reject('POSITION_CAP');
   if(p.positions[coin])return reject('ALREADY_OPEN');
   var localSeen=withAsset(coin,function(){return model(h,'base').seen||0});
   if(localSeen<120)return reject('MODEL_WARMUP '+localSeen+'/120');
@@ -494,29 +493,50 @@ function bootstrapPortfolioModel(coin){
     calibrate(bm,'PRETRAIN');calibrate(fm,'PRETRAIN');calibrate(gb,'PRETRAIN');calibrate(gf,'PRETRAIN');return (bm.seen||0)>=120;
   });
 }
+function bestPlanForAsset(coin){
+  return withAsset(coin,function(){
+    S.capital=portfolioState().capital;
+    var a=ensureAsset(coin),f=feats(),plans=[];
+    for(var hi=0;hi<H.length;hi++){var h=H[hi],m=mixed(h,f),pl=orderPlan(h,f,m);pl.h=h;pl.m=m;plans.push(pl)}
+    plans.sort(function(x,y){return(y.tradeScore||-Infinity)-(x.tradeScore||-Infinity)});
+    return{f:f,pl:plans[0],plans:plans};
+  });
+}
 function portfolioScan(){
-  P.h=S.h;var h=P.h,p=portfolioState(),rows=[],positions=p.positions||{};
+  var p=portfolioState(),rows=[],positions=p.positions||{},candidates=[];
   for(var i=0;i<P.universe.length;i++){
-    var coin=P.universe[i],a=ensureAsset(coin),mk=portfolioMark(coin),hasData=a.hl.candles.length>=80&&finite(a.hl.price);
-    if(!hasData){
-      rows.push({coin:coin,volume:P.volume[coin]||0,action:'CHARGEMENT',p:NaN,edge:NaN,ev:NaN,pos:!!positions[coin],price:mk.price,entry:mk.pos?mk.pos.entry:NaN,sl:mk.pos?mk.pos.sl:NaN,tp:mk.pos?mk.pos.tp:NaN,pnl:mk.total,unreal:mk.unreal,realized:mk.realized});
+    var coin=P.universe[i],a=ensureAsset(coin),mk=portfolioMark(coin),liveReady=fresh(a.hl.lastPrice,10000)&&fresh(a.hl.lastBook,10000)&&fresh(a.hl.lastTrades,15000)&&finite(a.hl.price);
+    if(!liveReady){
+      rows.push({coin:coin,h:NaN,volume:P.volume[coin]||0,action:'CHARGEMENT',p:NaN,edge:NaN,ev:NaN,profitEvBps:NaN,tradeScore:-Infinity,pos:!!positions[coin],price:mk.price,entry:mk.pos?mk.pos.entry:NaN,sl:mk.pos?mk.pos.sl:NaN,tp:mk.pos?mk.pos.tp:NaN,pnl:mk.total,unreal:mk.unreal,realized:mk.realized});
       continue;
     }
     try{
-      var out=withAsset(coin,function(){S.capital=p.capital;var f=feats(),m=mixed(h,f),pl=orderPlan(h,f,m);return{f:f,m:m,pl:pl}});
-      var pl=out.pl,act=(pl.direction==='LONG'||pl.direction==='SHORT')?pl.direction:'NO TRADE',existing=positions[coin];
-      if(act==='NO TRADE')P.lastOpenRejects[coin]=(pl.gateReasons&&pl.gateReasons.length)?pl.gateReasons.join(' · '):'NO_TRADE';
-      else if(!existing)portfolioOpen(coin,h,out.f,pl);
+      var out=bestPlanForAsset(coin),pl=out.pl,act=(pl.direction==='LONG'||pl.direction==='SHORT')?pl.direction:'NO TRADE',existing=positions[coin];
+      if(act!=='NO TRADE'&&!existing)candidates.push({coin:coin,h:pl.h,f:out.f,pl:pl});
+      else if(act==='NO TRADE')P.lastOpenRejects[coin]=(pl.gateReasons&&pl.gateReasons.length)?pl.gateReasons.join(' · '):'NO_TRADE';
       mk=portfolioMark(coin);existing=portfolioState().positions&&portfolioState().positions[coin];
-      rows.push({coin:coin,volume:P.volume[coin]||0,action:act,p:finite(pl.pd)?pl.pd:NaN,edge:finite(pl.edge)?pl.edge:NaN,ev:finite(pl.ev)?pl.ev:NaN,pos:!!existing,
+      rows.push({coin:coin,h:pl.h,volume:P.volume[coin]||0,action:act,p:finite(pl.pd)?pl.pd:NaN,edge:finite(pl.edge)?pl.edge:NaN,ev:finite(pl.ev)?pl.ev:NaN,profitEvBps:pl.profitEvBps,tradeScore:pl.tradeScore,pos:!!existing,
         price:mk.price,entry:existing?existing.entry:(act!=='NO TRADE'?pl.entry:NaN),sl:existing?existing.sl:(act!=='NO TRADE'?pl.sl:NaN),tp:existing?existing.tp:(act!=='NO TRADE'?pl.tp:NaN),
         pnl:mk.total,unreal:mk.unreal,realized:mk.realized});
     }catch(e){
       mk=portfolioMark(coin);
-      rows.push({coin:coin,volume:P.volume[coin]||0,action:'ERROR',p:NaN,edge:NaN,ev:NaN,pos:!!positions[coin],price:mk.price,entry:mk.pos?mk.pos.entry:NaN,sl:mk.pos?mk.pos.sl:NaN,tp:mk.pos?mk.pos.tp:NaN,pnl:mk.total,unreal:mk.unreal,realized:mk.realized});
+      rows.push({coin:coin,h:NaN,volume:P.volume[coin]||0,action:'ERROR',p:NaN,edge:NaN,ev:NaN,profitEvBps:NaN,tradeScore:-Infinity,pos:!!positions[coin],price:mk.price,entry:mk.pos?mk.pos.entry:NaN,sl:mk.pos?mk.pos.sl:NaN,tp:mk.pos?mk.pos.tp:NaN,pnl:mk.total,unreal:mk.unreal,realized:mk.realized});
+      P.lastOpenRejects[coin]='SCAN_ERROR';
     }
   }
-  P.signalsRows=rows;P.lastScan=now();save();renderPortfolio();
+  candidates.sort(function(x,y){return(y.pl.tradeScore||-Infinity)-(x.pl.tradeScore||-Infinity)});
+  var cap=Math.min(P.maxConcurrentPositions,candidates.length);
+  for(var ci=0;ci<cap;ci++){var c=candidates[ci],pp=portfolioState();if(!pp.positions[c.coin])portfolioOpen(c.coin,c.h,c.f,c.pl)}
+  // Re-mark positions after selection so the table reflects the actual portfolio.
+  for(var ri=0;ri<rows.length;ri++){
+    var row=rows[ri],pos=portfolioState().positions&&portfolioState().positions[row.coin];row.pos=!!pos;
+    if(pos){row.action=pos.direction;row.entry=pos.entry;row.sl=pos.sl;row.tp=pos.tp}
+  }
+  rows.sort(function(a,b){return(b.volume||0)-(a.volume||0));
+  P.signalsRows=rows;P.lastScan=now();
+  var focus=candidates[0]||rows.filter(function(x){return x.h&&x.tradeScore>-Infinity}).sort(function(a,b){return(b.tradeScore||-Infinity)-(a.tradeScore||-Infinity))[0];
+  if(focus){P.focusCoin=focus.coin;P.focusH=focus.h;attachAsset(focus.coin);S.coin=focus.coin;S.h=focus.h}
+  save();renderPortfolio();
 }
 function renderPortfolio(){
   var p=portfolioState(),used=portfolioMarginUsed(p),free=Math.max(0,p.capital-used),risk=portfolioRiskOpen(p),ks=Object.keys(p.positions||{}),rows=(P.signalsRows&&P.signalsRows.length)?P.signalsRows.slice():[];
@@ -735,24 +755,29 @@ function bestPair(h,dir,pd,po,entry,atr,f){
 }
 function orderPlan(h,f,m){
   var pL=m.p[2],pN=m.p[1],pS=m.p[0],dir=pL>=pS?'LONG':'SHORT',pd=dir==='LONG'?pL:pS,po=dir==='LONG'?pS:pL;
-  var d=f.depth||{},entry=dir==='LONG'?d.ask:d.bid,a=finite(f.atr)?f.atr:(finite(S.hl.price)?S.hl.price*.0025:NaN),q=dataQuality(f),costBps=roundTripCostBps(f),pair=bestPair(h,dir,pd,po,entry,a,f),riskCash=S.capital*S.risk/100;
-  var riskDist=a*pair.sl,sl=dir==='LONG'?entry-riskDist:entry+riskDist,tp=dir==='LONG'?entry+a*pair.tp:entry-a*pair.tp,rr=pair.sl>0?pair.tp/pair.sl:NaN;
+  var d=f.depth||{},entry=dir==='LONG'?d.ask:d.bid,a=f.atr,q=dataQuality(f),costBps=roundTripCostBps(f),pair=bestPair(h,dir,pd,po,entry,a,f),riskCash=S.capital*S.risk/100;
+  var riskDist=finite(a)?a*pair.sl:NaN,sl=dir==='LONG'?entry-riskDist:entry+riskDist,tp=dir==='LONG'?entry+a*pair.tp:entry-a*pair.tp,rr=pair.sl>0?pair.tp/pair.sl:NaN;
   var costPerUnit=(finite(entry)&&finite(sl)?executionCostPerUnit(entry,sl,spreadBps(f)):NaN),sz=riskDist>0&&finite(costPerUnit)?riskCash/(riskDist+costPerUnit):NaN;
-  var feeR=entry&&a&&pair.sl&&finite(costBps)?entry*(costBps/10000)/(a*pair.sl):NaN,evR=(pd*pair.tp)-(po*pair.sl)-feeR,evRet=entry&&a&&finite(costBps)?(pd*(a*pair.tp/entry)-po*(a*pair.sl/entry)-costBps/10000):NaN,edge=pd-po;
-  var es=m.score,align=finite(es)?(dir==='LONG'?es: -es):NaN, strongEvidence=finite(align)&&align>=.08;
+  var classEv=entry&&a&&finite(costBps)?(pd*(a*pair.tp/entry)-po*(a*pair.sl/entry)-costBps/10000):NaN;
+  var pe=profitExpectation(h,S.coin,dir,m.p),profitEv=finite(pe.ret)?pe.ret:NaN,profitObs=pe.globalN||0,localProfitObs=pe.localN||0;
+  var blendW=clamp(profitObs/500,0,.80),blendedEv=finite(classEv)&&finite(profitEv)?classEv*(1-blendW)+profitEv*blendW:finite(profitEv)?profitEv:classEv;
+  var es=m.score,align=finite(es)?(dir==='LONG'?es:-es):NaN,modelSeen=globalModel(h,'base').seen||0;
   var gateReasons=[];
-  if(!finite(entry)||!finite(a)||!finite(f.l2)||!finite(sl)||!finite(tp)||!finite(rr))gateReasons.push('L2/ATR');
-  if(q<75)gateReasons.push('DQ<75');
-  if(pd<.50)gateReasons.push('prob<50%');
-  if(edge<.03)gateReasons.push('edge<3pt');
-  if(!strongEvidence)gateReasons.push('evidence');
+  if(!finite(entry)||!finite(a)||!finite(f.l2)||!finite(sl)||!finite(tp)||!finite(rr))gateReasons.push('LIVE_DATA');
+  if(q<70)gateReasons.push('DQ<70');
+  if(modelSeen<P.minGlobalModelObs)gateReasons.push('GLOBAL_MODEL_WARMUP');
+  if(profitObs<P.minGlobalProfitObs)gateReasons.push('PROFIT_CALIBRATION '+profitObs+'/'+P.minGlobalProfitObs);
+  if(pd<.45)gateReasons.push('prob<45%');
   if(!finite(costBps)||costBps>P.maxRoundTripCostBps)gateReasons.push('cost>'+P.maxRoundTripCostBps+'bps');
-  if(!finite(evRet)||evRet*10000<2)gateReasons.push('EV<2bps');
-  var gate=gateReasons.length>0;
+  if(!finite(blendedEv)||blendedEv*10000<3)gateReasons.push('NET_EV<3bps');
+  var gate=gateReasons.length>0,confidence=clamp(Math.min(profitObs/P.minGlobalProfitObs,localProfitObs/Math.max(1,P.minAssetProfitObs)+.2),0,1);
+  var tradeScore=finite(blendedEv)?blendedEv*Math.max(.25,confidence)*(q/100): -Infinity;
   return{
-    direction:gate?'NO TRADE':dir,candidate:dir,pd:pd,po:po,edge:edge,evidence:es,align:align,q:q,costBps:costBps,
-    entry:gate?NaN:entry,sl:gate?NaN:sl,tp:gate?NaN:tp,rr:gate?NaN:rr,size:gate?NaN:sz,ev:gate?NaN:evRet,evR:gate?NaN:evR,
-    pair:pair,gateReasons:gateReasons,reason:gate?'Portail fermé : '+gateReasons.join(' · '):'Portail ouvert : direction + évidence + EV nette après frais, spread et slippage.'
+    direction:gate?'NO TRADE':dir,candidate:dir,pd:pd,po:po,edge:pd-po,evidence:es,align:align,q:q,costBps:costBps,
+    profitEv:profitEv,profitEvBps:finite(profitEv)?profitEv*10000:NaN,blendedEv:blendedEv,blendedEvBps:finite(blendedEv)?blendedEv*10000:NaN,
+    profitObs:profitObs,localProfitObs:localProfitObs,modelSeen:modelSeen,tradeScore:tradeScore,
+    entry:gate?NaN:entry,sl:gate?NaN:sl,tp:gate?NaN:tp,rr:gate?NaN:rr,size:gate?NaN:sz,ev:gate?NaN:blendedEv,evR:gate?NaN:classEv,
+    pair:pair,gateReasons:gateReasons,reason:gate?'Portail fermé : '+gateReasons.join(' · '):'Portail ouvert : rendement net calibré sur les réalisations de tout l’univers.'
   };
 }
 function hlabel(h){return h===1440?'1j':h===60?'1h':h===240?'4h':h+'m'}
