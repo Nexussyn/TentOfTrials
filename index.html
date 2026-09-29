@@ -386,7 +386,7 @@ var S={
 var P={
   assets:[],universe:[],states:{},volume:{},wsSubscribed:{},
   focusCoin:'',focusH:5,
-  maxAssets:Infinity,maxSlots:Infinity,maxConcurrentPositions:8,maxLeverage:5,maxMarginPct:.20,maxPortfolioRiskPct:.02,maxSameSide:Infinity,
+  maxAssets:Infinity,maxSlots:Infinity,maxConcurrentPositions:4,maxLeverage:5,maxMarginPct:.20,maxPortfolioRiskPct:.02,maxSameSide:Infinity,
   maxRoundTripCostBps:24,minGlobalProfitObs:200,minAssetProfitObs:5,minGlobalModelObs:120,minAssetLiveObs:20,
   bootstrapConcurrency:1,bootstrapIntervalMs:60000,bootstrapMinSpacingMs:2500,bootstrapRunning:false,bootstrapIntervalSince:0,
   wsQueue:[],wsWanted:{},wsAcked:{},wsSentAt:{},wsPumpTimer:0,wsGeneration:0,
@@ -439,6 +439,7 @@ function portfolioOpen(coin,h,f,pl){
   if(sameSide>=P.maxSameSide)return reject('SAME_SIDE');
   var portfolioBudget=p.capital*P.maxPortfolioRiskPct,remainingRisk=Math.max(0,portfolioBudget-portfolioRiskOpen(p)),riskCash=Math.min(p.capital*(S.risk/100),remainingRisk),riskDist=Math.abs(pl.entry-pl.sl),feePerUnit=executionCostPerUnit(pl.entry,pl.sl,spreadBps(f)),size=riskDist>0&&finite(feePerUnit)&&riskCash>0?riskCash/(riskDist+feePerUnit):NaN;
   if(!finite(size)||size<=0)return reject('SIZE');
+  var minRiskCash=p.capital*0.001;if(riskCash<minRiskCash)return reject('RISK_BUDGET_EXHAUSTED');
   var lev=Math.min(P.maxLeverage,finite(a.maxLeverage)?a.maxLeverage:P.maxLeverage),notional=Math.abs(size*pl.entry),margin=notional/Math.max(1,lev),free=Math.max(0,p.capital-portfolioMarginUsed(p)),marginCap=p.capital*P.maxMarginPct;
   if(margin>marginCap){size=(marginCap*lev)/pl.entry;notional=Math.abs(size*pl.entry);margin=notional/lev}
   if(margin>free*0.98){size=(free*0.98*lev)/pl.entry;notional=Math.abs(size*pl.entry);margin=notional/lev}
@@ -902,14 +903,9 @@ function targetThreshold(price,atr1m,h){
   return clamp(scaled,.0015,.06);
 }
 function recordForecast(h,f,m,pl){
-  var key=S.coin+'_'+h,arr=DB.pending[key]||[],pstate=paperState(h);DB.pending[key]=arr;
+  var key=S.coin+'_'+h,arr=DB.pending[key]||[];DB.pending[key]=arr;
   var unresolved=arr.some(function(x){return x&&!x.paperResolved});if(unresolved)return false;
-  var actionable=(pl.direction==='LONG'||pl.direction==='SHORT')&&finite(pl.entry)&&finite(pl.sl)&&finite(pl.tp)&&!pstate.position&&!paperPendingExists(h);
-  var rec={ts:now(),h:h,coin:S.coin,p0:S.hl.price,paperCapital:S.capital,paperRisk:S.risk,paperFee:S.fee,paperSlip:S.slip,targetThr:targetThreshold(S.hl.price,f.atr,h),spreadBps:spreadBps(f),pBase:m.base.p.slice(),pFull:m.full.p.slice(),vBase:m.base.v.slice(),vFull:m.full.v.slice(),candidate:pl.candidate,entry:finite(pl.entry)?pl.entry:S.hl.price,direction:pl.direction,dir:pl.direction,atr:f.atr,pair:pl.pair||null,sl:pl.sl,tp:pl.tp,rr:pl.rr,paper:false,actionable:false};
-  if(actionable){
-    var riskDist=Math.abs(pl.entry-pl.sl),riskCash=pstate.capital*(rec.paperRisk)/100,feePerUnit=(finite(pl.entry)&&finite(pl.sl)?(Math.abs(pl.entry)+Math.abs(pl.sl))*(rec.paperFee/10000)+(Math.abs(pl.entry)+Math.abs(pl.sl))*(rec.paperSlip/10000)+Math.abs(pl.entry)*(finite(rec.spreadBps)?rec.spreadBps:0)/10000:NaN),sz=riskDist>0&&finite(feePerUnit)?riskCash/(riskDist+feePerUnit):NaN;
-    if(finite(sz)&&sz>0){rec.paper=true;rec.actionable=true;rec.size=sz;pstate.position={ts:rec.ts,direction:rec.direction,entry:rec.entry,sl:rec.sl,tp:rec.tp,size:sz,paperFee:rec.paperFee,paperSlip:rec.paperSlip,spreadBps:rec.spreadBps,lastTs:rec.ts,closed:false};save()}
-  }
+  var rec={ts:now(),h:h,coin:S.coin,p0:S.hl.price,targetThr:targetThreshold(S.hl.price,f.atr,h),spreadBps:spreadBps(f),pBase:m.base.p.slice(),pFull:m.full.p.slice(),vBase:m.base.v.slice(),vFull:m.full.v.slice(),candidate:pl.candidate,entry:finite(pl.entry)?pl.entry:S.hl.price,direction:pl.candidate,dir:pl.candidate,atr:f.atr,pair:pl.pair||null,sl:pl.sl,tp:pl.tp,rr:pl.rr,paper:false,actionable:false,gateReasons:(pl.gateReasons||[]).slice(),createdBy:'V16_UNIVERSE_SHADOW'};
   DB.pending[key].push(rec);var maxPending=Math.max(60,Math.min(400,Math.ceil(h*1.5)));DB.pending[key]=DB.pending[key].slice(-maxPending);save();return true;
 }
 function forecastAllUniverse(){
@@ -954,7 +950,7 @@ function pathPriceAt(t0,h,path,coin){
 }
 function pathBetween(t0,h){return localPath(t0,h)}
 function learnGrid(h,p,pathObj){
-  if(!p||!p.paper||p.direction!=='LONG'&&p.direction!=='SHORT')return;
+  if(!p||p.direction!=='LONG'&&p.direction!=='SHORT')return;
   if(!finite(p.entry)||!finite(p.atr)||!pathObj||!pathObj.items||!pathObj.items.length)return;
   var g=grid(h,p.direction),items=pathObj.items;
   for(var i=0;i<g.length;i++){
@@ -1000,7 +996,7 @@ async function resolve(){
             prB=probsNormalize(p.pBase);prF=probsNormalize(p.pFull);if(!prB||!prF)throw new Error('legacy pending record has no valid frozen probabilities');DB.legacyResolved=(DB.legacyResolved||0)+1;
           }
           if(!DB.obs[key])DB.obs[key]=[];DB.obs[key].push({ts:p.ts,target:target,pb:prB,pf:prF,netRet:finite(netRet)?netRet:NaN,actionable:p.actionable===true,source:vb&&vf?'LIVE':'LEGACY'});DB.obs[key]=DB.obs[key].slice(-150);
-          if(p.paper){withAsset(coin,function(){learnGrid(h,p,path);var led=paperState(h);if(led.position&&led.position.ts===p.ts)settlePaperPosition(h,led.position,at.p,'HORIZON',at.t)})}
+          learnGrid(h,p,path);updateProfitCalibration(h,coin,p.candidate,target,netRet);
         }catch(e){diagError('RESOLVE_'+coin+'_'+h+'_'+i,e);if(now()-p.ts>10*60000)DB.resolvedErrors=(DB.resolvedErrors||0)+1;else keep.push(p)}
       }
       DB.pending[key]=keep;
