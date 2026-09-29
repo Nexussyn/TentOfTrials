@@ -1006,13 +1006,41 @@ function updatePortfolioUniverse(ctx){
   P.maxSlots=Math.max(1,P.universe.length);P.maxAssets=P.universe.length;P.lastMeta=now();
   if(S.hlSocket&&S.hlSocket.readyState===1)subscribeNewPortfolioAssets();
 }
+function subKey(s){
+  return String(s&&s.type||'')+':'+String(s&&s.coin||'')+':'+String(s&&s.interval||'')+':'+String(s&&s.dex||'');
+}
+function queueSubscription(sub){
+  var k=subKey(sub);if(!k||P.wsAcked[k]||P.wsWanted[k])return false;
+  P.wsWanted[k]=true;P.wsQueue.push(sub);return true;
+}
+function pumpSubscriptions(ws){
+  if(!ws||ws.readyState!==1||P.wsPumpTimer||P.wsQueue.length===0)return;
+  var step=function(){
+    P.wsPumpTimer=0;
+    if(!ws||ws!==S.hlSocket||ws.readyState!==1)return;
+    if(P.wsQueue.length){
+      var sub=P.wsQueue.shift(),k=subKey(sub);
+      try{
+        ws.send(JSON.stringify({method:'subscribe',subscription:sub}));
+        P.wsSentAt[k]=now();
+      }catch(e){delete P.wsWanted[k];}
+      P.wsPumpTimer=setTimeout(step,110);
+    }
+  };
+  step();
+}
 function subscribeNewPortfolioAssets(){
   var ws=S.hlSocket;if(!ws||ws.readyState!==1)return;
-  var list=P.universe.slice(),subs=[],seen=P.wsSubscribed||{};P.wsSubscribed=seen;
-  for(var i=0;i<list.length;i++){var coin=list[i];if(seen[coin])continue;seen[coin]=true;subs.push({type:'l2Book',coin:coin},{type:'trades',coin:coin},{type:'candle',coin:coin,interval:'1m'},{type:'activeAssetCtx',coin:coin})}
-  var cur=0;
-  function sendBatch(){if(ws.readyState!==1)return;var n=0;while(cur<subs.length&&n<16){try{ws.send(JSON.stringify({method:'subscribe',subscription:subs[cur++]}))}catch(e){}n++}if(cur<subs.length)setTimeout(sendBatch,100)}
-  sendBatch();
+  queueSubscription({type:'allMids'});
+  var list=P.universe.slice();
+  for(var i=0;i<list.length;i++){
+    var coin=list[i];
+    queueSubscription({type:'l2Book',coin:coin});
+    queueSubscription({type:'trades',coin:coin});
+    queueSubscription({type:'candle',coin:coin,interval:'1m'});
+    queueSubscription({type:'activeAssetCtx',coin:coin});
+  }
+  pumpSubscriptions(ws);
 }
 async function restSync(){
   var t=now(),results=[];
@@ -1046,23 +1074,23 @@ async function restSync(){
 S.feed.BN_REST=(boi&&boi.ok)||(bp&&bp.ok)?'OK':'STALE';S.lastRest=t;S.bn.lastRest=t;return settled;
 }
 function reconnectHL(){
-  var attempt=0,timer=0,retry=0;
+  var attempt=0,timer=0;
   function go(){
     attempt++;S.feed.HL_WS='RECONNECTING';
     try{
       var ws=new WebSocket(HLWS);S.hlSocket=ws;
       ws.onopen=function(){
-        attempt=0;P.wsSubscribed={};S.feed.HL_WS='OK';
-        var coin=S.coin;
-        [{type:'allMids'},{type:'l2Book',coin:coin},{type:'trades',coin:coin},{type:'candle',coin:coin,interval:'1m'},{type:'activeAssetCtx',coin:coin}].forEach(function(sub){try{ws.send(JSON.stringify({method:'subscribe',subscription:sub}))}catch(e){}});
-        P.wsSubscribed[coin]=true;
-        setTimeout(function(){if(ws.readyState===1){if(!fresh(S.hl.lastBook,5000))try{ws.send(JSON.stringify({method:'subscribe',subscription:{type:'l2Book',coin:S.coin}}))}catch(e){}if(!fresh(S.hl.lastTrades,10000))try{ws.send(JSON.stringify({method:'subscribe',subscription:{type:'trades',coin:S.coin}}))}catch(e){}}},2000);
+        attempt=0;P.wsGeneration++;P.wsQueue=[];P.wsWanted={};P.wsAcked={};P.wsSentAt={};clearTimeout(P.wsPumpTimer);P.wsPumpTimer=0;S.feed.HL_WS='OK';
         subscribeNewPortfolioAssets();
-        clearInterval(timer);timer=setInterval(function(){if(ws.readyState===1)ws.send(JSON.stringify({method:'ping'}))},20000);
+        clearInterval(timer);timer=setInterval(function(){if(ws.readyState===1)ws.send(JSON.stringify({method:'ping'}))},30000);
       };
       ws.onmessage=function(e){try{
         var m=JSON.parse(e.data),t=now();
-        if(m.channel==='allMids'&&m.data&&m.data.mids){
+        if(m.channel==='subscriptionResponse'&&m.data){
+          var ack=subKey(m.data);
+          if(ack){P.wsAcked[ack]=t;delete P.wsWanted[ack];delete P.wsSentAt[ack];}
+          pumpSubscriptions(ws);
+        }else if(m.channel==='allMids'&&m.data&&m.data.mids){
           Object.keys(m.data.mids).forEach(function(coin){var a=ensureAsset(coin),px=+m.data.mids[coin];if(finite(px)){a.hl.price=px;a.hl.lastPrice=t;a.tape.push({t:t,p:px});a.tape=a.tape.slice(-50000)}});
           S.hl=ensureAsset(S.coin).hl;S.tape=ensureAsset(S.coin).tape;
         }else if(m.channel==='l2Book'&&m.data){
@@ -1073,10 +1101,17 @@ function reconnectHL(){
         }else if(m.channel==='candle'&&m.data){
           var q=m.data.data||m.data,coin=q.s||q.coin,a=ensureAsset(coin||S.coin);if(q&&q.t!=null){a.hl.candles.push({t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v});a.hl.candles=a.hl.candles.slice(-5000);a.feed.HL_CANDLE='OK';if((coin||S.coin)===S.coin)S.hl=a.hl}
         }else if(m.channel==='activeAssetCtx'&&m.data){
-          var d2=m.data.data||m.data,coin2=d2.coin||S.coin,q2=d2.ctx||d2,a2=ensureAsset(coin2);if(q2){if(q2.openInterest!=null){a2.hl.oi=+q2.openInterest;a2.hl.oiHist.push({t:t,v:a2.hl.oi});a2.hl.oiHist=a2.hl.oiHist.slice(-1000)}if(q2.funding!=null)a2.hl.funding=+q2.funding;a2.hl.lastCtx=t;a2.feed.HL_CTX='OK';if(coin2===S.coin)S.hl=a2.hl}
+          var d2=m.data.data||m.data,coin2=d2.coin||S.coin,q2=m.data.ctx||d2.ctx||d2,a2=ensureAsset(coin2);if(q2){
+            if(q2.openInterest!=null){a2.hl.oi=+q2.openInterest;a2.hl.oiHist.push({t:t,v:a2.hl.oi});a2.hl.oiHist=a2.hl.oiHist.slice(-1000)}
+            if(q2.funding!=null)a2.hl.funding=+q2.funding;
+            if(q2.markPx!=null)a2.hl.markPx=+q2.markPx;
+            if(q2.oraclePx!=null)a2.hl.oraclePx=+q2.oraclePx;
+            if(q2.dayNtlVlm!=null)a2.hl.dayNtlVlm=+q2.dayNtlVlm;
+            a2.hl.lastCtx=t;a2.feed.HL_CTX='OK';if(coin2===S.coin)S.hl=a2.hl
+          }
         }
       }catch(e){diagError('HL_WS_MESSAGE',e)}};
-      ws.onclose=function(){clearInterval(timer);S.feed.HL_WS='RECONNECTING';setTimeout(go,clamp(1000*Math.pow(2,Math.min(attempt,6)),1000,30000))};
+      ws.onclose=function(){clearInterval(timer);clearTimeout(P.wsPumpTimer);P.wsPumpTimer=0;P.wsQueue=[];P.wsWanted={};P.wsAcked={};P.wsSentAt={};S.feed.HL_WS='RECONNECTING';setTimeout(go,clamp(1000*Math.pow(2,Math.min(attempt,6)),1000,30000))};
       ws.onerror=function(){try{ws.close()}catch(e){}};
     }catch(e){setTimeout(go,3000)}
   }
