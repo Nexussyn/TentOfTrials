@@ -308,7 +308,7 @@ var DB=(function(){
   }
   return normalizeDB(stable);
 })();
-var idbTimer=0;
+var idbTimer=0,saveTimer=0,saveQueued=false;
 function idbPutSnapshot(){
   if(!window.indexedDB)return;
   try{
@@ -317,11 +317,19 @@ function idbPutSnapshot(){
     req.onsuccess=function(){var db=req.result;try{var tx=db.transaction(IDB_STORE,'readwrite');tx.objectStore(IDB_STORE).put({id:'state',updatedAt:DB.updatedAt||now(),db:DB});tx.oncomplete=function(){db.close()}}catch(e){try{db.close()}catch(_){} }};
   }catch(e){}
 }
+function flushSave(){
+  saveQueued=false;
+  try{localStorage.setItem(STORE,JSON.stringify(DB))}catch(e){}
+  clearTimeout(idbTimer);idbTimer=setTimeout(idbPutSnapshot,100);
+}
 function save(){
   DB.updatedAt=now();
-  try{localStorage.setItem(STORE,JSON.stringify(DB))}catch(e){}
-  clearTimeout(idbTimer);idbTimer=setTimeout(idbPutSnapshot,250);
+  clearTimeout(saveTimer);
+  saveQueued=true;
+  saveTimer=setTimeout(flushSave,100);
 }
+window.addEventListener('pagehide',function(){try{clearTimeout(saveTimer);flushSave()}catch(e){}});
+window.addEventListener('beforeunload',function(){try{clearTimeout(saveTimer);flushSave()}catch(e){}});
 async function hydratePersistent(){
   if(!window.indexedDB){save();return}
   await new Promise(function(resolve){
@@ -808,8 +816,10 @@ function recordForecast(h,f,m,pl){
 function forecastAllUniverse(){
   var list=P.universe.slice(),created=0;
   for(var ci=0;ci<list.length;ci++){var coin=list[ci];withAsset(coin,function(){for(var hi=0;hi<H.length;hi++){var h=H[hi],f=feats(),m=mixed(h,f),pl=orderPlan(h,f,m);if(recordForecast(h,f,m,pl)!==false)created++}})}
+  save();
   return created;
 }
+
 function localPath(t0,h,coin){
   var a=coin?ensureAsset(coin):ensureAsset(S.coin),tape=a.tape,candles=a.hl.candles,due=t0+h*60000;
   var tick=tape.filter(function(x){return x.t>=t0-2000&&x.t<=due+2000&&finite(x.p)});
