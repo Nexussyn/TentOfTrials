@@ -1106,8 +1106,19 @@ function subscribeNewPortfolioAssets(){
   pumpSubscriptions(ws);
 }
 async function restSync(){
-  var t=now(),ctx=null,focus=null;
-  try{ctx=await hl({type:'metaAndAssetCtxs'});updatePortfolioUniverse(ctx)}catch(e){ctx=null}
+  var t=now(),metaAll=null,dexs=null,focus=null;
+  try{
+    var metaJobs=await Promise.all([
+      hl({type:'allPerpMetas'}).catch(function(){return null}),
+      hl({type:'perpDexs'}).catch(function(){return null})
+    ]);
+    metaAll=metaJobs[0];dexs=metaJobs[1];
+    if(Array.isArray(dexs)){
+      P.perpDexNames=dexs.map(function(x){return x&&x.name?String(x.name):''});
+      if(P.perpDexNames.length===0)P.perpDexNames=[''];
+    }
+    if(Array.isArray(metaAll))updateAllDexUniverse(metaAll);
+  }catch(e){}
   focus=P.focusCoin||P.universe[0]||'';
   if(!focus){S.lastRest=t;return[]}
   var jobs=[
@@ -1122,10 +1133,6 @@ async function restSync(){
     for(var i=0;i<a.hl.candles.length;i++){var z=a.hl.candles[i];if(z&&z.t!=null)map[z.t]=z}
     for(var j=0;j<recent.length;j++){var y=recent[j];if(y&&y.t!=null)map[y.t]=y}
     a.hl.candles=Object.values(map).sort(function(x,y){return x.t-y.t}).slice(-5000);a.feed.HL_CANDLE='OK';
-  }
-  if(ctx&&ctx[0]&&Array.isArray(ctx[0].universe)){
-    var u=ctx[0].universe||[],ac=Array.isArray(ctx[1])?ctx[1]:[],idx=u.findIndex(function(q){return q.name===focus}),cx=ac[idx];
-    if(idx>=0&&cx){a.hl.oi=+cx.openInterest;a.hl.funding=+cx.funding;a.hl.markPx=+cx.markPx;a.hl.oraclePx=+cx.oraclePx;a.hl.dayNtlVlm=+cx.dayNtlVlm;a.hl.lastCtx=t;a.feed.HL_CTX='OK'}
   }
   if(hlL2&&hlL2.ok&&hlL2.v&&Array.isArray(hlL2.v.levels)&&hlL2.v.levels.length>=2){a.hl.book=hlL2.v;a.hl.lastBook=t;a.feed.HL_L2='OK'}
   if(hlTrades&&hlTrades.ok&&Array.isArray(hlTrades.v)&&hlTrades.v.length){
@@ -1158,7 +1165,7 @@ function reconnectHL(){
       ws.onmessage=function(e){try{
         var m=JSON.parse(e.data),t=now();
         if(m.channel==='subscriptionResponse'&&m.data){
-          var ack=subKey(m.data);
+          var ack=subKey(m.data.subscription||m.data);
           if(ack){P.wsAcked[ack]=t;delete P.wsWanted[ack];delete P.wsSentAt[ack];}
           pumpSubscriptions(ws);
         }else if(m.channel==='allDexsAssetCtxs'&&m.data){
