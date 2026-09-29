@@ -1252,15 +1252,29 @@ function renderBook(f){
     '<div><div class="line"><span>Ask</span><b>'+nfmt(d.ask)+'</b></div><div class="line"><span>Ask depth</span><b>'+nfmt(d.as,3)+'</b></div></div>'+
     '<div style="grid-column:1/-1"><div class="line"><span>Imbalance</span><b>'+pct(d.imb)+'</b></div><div class="line"><span>Microprice bias</span><b>'+pct(d.microBias,3)+'</b></div><div class="line"><span>Spread</span><b>'+pct(d.spread,4)+'</b></div></div>';
 }
+function statsFromObs(o){
+  o=Array.isArray(o)?o:[];
+  if(!o.length)return{n:0,b:NaN,ll:NaN,hit:NaN,roll:NaN,delta:NaN,ciLo:NaN,ciHi:NaN,net:NaN,actionableN:0};
+  var valid=o.filter(function(x){return Array.isArray(x.pf)&&Number.isInteger(x.target)}),bs=valid.map(function(x){return brier(x.pf,x.target)}),ls=valid.map(function(x){return logloss(x.pf,x.target)}),hits=valid.map(function(x){return x.pf.indexOf(Math.max.apply(null,x.pf))===x.target?1:0}),recent=bs.slice(-50);
+  var dif=valid.map(function(x){return brier(x.pb,x.target)-brier(x.pf,x.target)}),md=dif.length?metricArr(dif):NaN,sd=dif.length>1?Math.sqrt(dif.reduce(function(s,x){return s+(x-md)*(x-md)},0)/(dif.length-1)):0,se=dif.length?sd/Math.sqrt(dif.length):NaN,margin=finite(se)?1.96*se:NaN;
+  var nets=o.filter(function(x){return finite(x.netRet)}).map(function(x){return x.netRet});
+  return{n:o.length,b:metricArr(bs),ll:metricArr(ls),hit:metricArr(hits),roll:metricArr(recent),delta:md,ciLo:finite(md)&&finite(margin)?md-margin:NaN,ciHi:finite(md)&&finite(margin)?md+margin:NaN,net:nets.length?metricArr(nets):NaN,actionableN:nets.length};
+}
+function globalObsFor(h){
+  var out=[],suffix='_'+String(h);
+  Object.keys(DB.obs||{}).forEach(function(k){if(k.slice(-suffix.length)===suffix&&Array.isArray(DB.obs[k]))out=out.concat(DB.obs[k])});
+  out.sort(function(a,b){return(+a.ts||0)-(+b.ts||0)});return out.slice(-50000);
+}
+function globalStatsFor(h){return statsFromObs(globalObsFor(h))}
+function globalPretrainCount(h){
+  var n=0;Object.keys(DB.pretrain||{}).forEach(function(coin){var z=DB.pretrain[coin],x=z&&z.h&&z.h[h];if(x&&finite(x.n))n+=x.n});return n;
+}
 function renderCapital(){
   try{
-    $('capitalCards').innerHTML=H.map(function(h){
-      var p=paperStats(h),cls=p.returnPct>0?'up':p.returnPct<0?'down':'neu';
-      return'<div class="capitalBox"><div class="title"><b>'+hlabel(h)+'</b><span class="badge">'+p.trades+' trades</span></div><div class="tiny">DEPART '+nfmt(paperState(h).capitalBase,2)+'</div><b class="'+cls+'">'+nfmt(p.capital,2)+' USDC</b><div class="capitalSub">'+(finite(p.returnPct)?((p.returnPct>=0?'+':'')+(p.returnPct*100).toFixed(2)+'%'):'—')+' · DD '+(p.maxDD*100).toFixed(2)+'% · frais '+nfmt(p.fees,2)+'</div></div>';
-    }).join('');
-  }catch(e){
-    $('capitalCards').innerHTML='<div class="note">Capital paper indisponible temporairement : '+String(e.message||e)+'</div>';
-  }
+    var p=portfolioState(),all=0;for(var hi=0;hi<H.length;hi++)all+=globalStatsFor(H[hi]).n;
+    $('capitalCards').innerHTML='<div class="capitalBox" style="grid-column:1/-1"><div class="title"><b>PORTFOLIO UNIQUE · '+P.universe.length+' ACTIFS</b><span class="badge">GLOBAL OOS '+all+'</span></div><b class="'+(p.capital>=p.capitalBase?'up':'down')+'">'+nfmt(p.capital,2)+' USDC</b><div class="capitalSub">Départ '+nfmt(p.capitalBase,2)+' · réalisé '+nfmt(p.capital-p.capitalBase,2)+' · DD '+(p.maxDD*100).toFixed(2)+'% · frais '+nfmt(p.fees,2)+' · positions '+Object.keys(p.positions||{}).length+'/'+P.maxConcurrentPositions+'</div></div>'+
+      H.map(function(h){var s=globalStatsFor(h);return'<div class="capitalBox"><div class="title"><b>OOS '+hlabel(h)+'</b><span class="badge">'+s.n+' observations</span></div><b>'+ (finite(s.net)?(s.net*10000).toFixed(2)+' bps':'—') +'</b><div class="capitalSub">Brier '+nfmt(s.b,4)+' · Hit '+pct(s.hit,1)+' · calibr. profit '+profitCount(h,'LONG')+' L / '+profitCount(h,'SHORT')+' S</div></div>'}).join('');
+  }catch(e){$('capitalCards').innerHTML='<div class="note">Performance indisponible temporairement : '+String(e.message||e)+'</div>';}
 }
 function renderHealth(){
   var f=Object.assign({},S.feed);
@@ -1271,8 +1285,8 @@ function renderHealth(){
 }
 function journal(){
   $('journal').innerHTML=H.map(function(h){
-    var s=statsFor(h),pp=paperStats(h),pre=(DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[h]&&DB.pretrain[S.coin].h[h].n)||0,ver=pasrVerdict(h);
-    return'<tr><td>'+hlabel(h)+'</td><td>'+pre+'</td><td>'+s.n+'</td><td>'+nfmt(pp.capital,2)+'</td><td>'+pp.trades+'</td><td>'+nfmt(s.b,4)+'</td><td>'+nfmt(s.ll,4)+'</td><td>'+pct(s.hit,1)+'</td><td>'+(finite(s.net)?(s.net*10000).toFixed(2)+' bps':'—')+'</td><td>'+nfmt(s.delta,4)+'</td><td>'+ver+'</td></tr>';
+    var s=globalStatsFor(h),ver=s.n<100?'CALIBRATING':pasrVerdict(h);
+    return'<tr><td>'+hlabel(h)+'</td><td>'+globalPretrainCount(h)+'</td><td>'+s.n+'</td><td>—</td><td>'+s.actionableN+'</td><td>'+nfmt(s.b,4)+'</td><td>'+nfmt(s.ll,4)+'</td><td>'+pct(s.hit,1)+'</td><td>'+(finite(s.net)?(s.net*10000).toFixed(2)+' bps':'—')+'</td><td>'+nfmt(s.delta,4)+'</td><td>'+ver+'</td></tr>';
   }).join('');
 }
 function draw(){
