@@ -389,7 +389,7 @@ var P={
   maxRoundTripCostBps:24,minNetEvBps:3,minGlobalProfitObs:200,minAssetProfitObs:5,minGlobalModelObs:120,minAssetLiveObs:20,timeStopMultiple:2,
   bootstrapConcurrency:1,bootstrapIntervalMs:60000,bootstrapMinSpacingMs:2500,bootstrapRunning:false,bootstrapIntervalSince:0,
   wsQueue:[],wsWanted:{},wsAcked:{},wsSentAt:{},wsSubDefs:{},wsPumpTimer:0,wsWatchdog:0,wsGeneration:0,
-  perpDexNames:[''],universeByDex:{},
+  perpDexNames:[''],universeByDex:{},resolveRestNext:0,
   h:5,lastScan:0,lastMeta:0,lastBootstrap:0,bootstrapped:{},positions:{},cooldown:{},signalsRows:[],lastOpenRejects:{}
 };
 function newAssetState(){
@@ -516,7 +516,7 @@ function bestPlanForAsset(coin){
 function portfolioScan(){
   var p=portfolioState(),rows=[],positions=p.positions||{},candidates=[];
   for(var i=0;i<P.universe.length;i++){
-    var coin=P.universe[i],a=ensureAsset(coin),mk=portfolioMark(coin),liveReady=fresh(a.hl.lastPrice,10000)&&fresh(a.hl.lastBook,10000)&&fresh(a.hl.lastTrades,15000)&&finite(a.hl.price);
+    var coin=P.universe[i],a=ensureAsset(coin),mk=portfolioMark(coin),liveReady=fresh(a.hl.lastPrice,10000)&&fresh(a.hl.lastBook,10000)&&finite(a.hl.price);
     if(!liveReady){
       rows.push({coin:coin,h:NaN,volume:P.volume[coin]||0,action:'CHARGEMENT',p:NaN,edge:NaN,ev:NaN,profitEvBps:NaN,tradeScore:-Infinity,pos:!!positions[coin],price:mk.price,entry:mk.pos?mk.pos.entry:NaN,sl:mk.pos?mk.pos.sl:NaN,tp:mk.pos?mk.pos.tp:NaN,pnl:mk.total,unreal:mk.unreal,realized:mk.realized});
       continue;
@@ -932,6 +932,7 @@ function localPath(t0,h,coin){
 }
 async function fetchPath(t0,h,coin){
   var local=localPath(t0,h,coin);if(local)return local;
+  var wait=Math.max(0,(P.resolveRestNext||0)-now());if(wait)await sleepMs(wait);P.resolveRestNext=now()+1500;
   var due=t0+h*60000,start=Math.max(0,t0-60000),end=due+120000;
   try{
     var res=await hl({type:'candleSnapshot',req:{coin:coin||S.coin,interval:'1m',startTime:start,endTime:end}});
@@ -1106,7 +1107,7 @@ function subscribeNewPortfolioAssets(){
   pumpSubscriptions(ws);
 }
 async function restSync(){
-  var t=now(),metaAll=null,dexs=null,focus=null;
+  var t=now(),metaAll=null,dexs=null;
   try{
     var metaJobs=await Promise.all([
       hl({type:'allPerpMetas'}).catch(function(){return null}),
@@ -1119,27 +1120,8 @@ async function restSync(){
     }
     if(Array.isArray(metaAll))updateAllDexUniverse(metaAll);
   }catch(e){}
-  focus=P.focusCoin||P.universe[0]||'';
-  if(!focus){S.lastRest=t;return[]}
-  var jobs=[
-    {name:'HL_CANDLE',p:hl({type:'candleSnapshot',req:{coin:focus,interval:'1m',startTime:t-240*60000,endTime:t}})},
-    {name:'HL_L2',p:hl({type:'l2Book',coin:focus})},
-    {name:'HL_TRADES',p:hl({type:'recentTrades',coin:focus})}
-  ];
-  var settled=await Promise.all(jobs.map(function(j){return Promise.resolve(j.p).then(function(v){return{name:j.name,ok:true,v:v}}).catch(function(e){return{name:j.name,ok:false,e:e}})}));
-  var a=ensureAsset(focus),hc=settled[0],hlL2=settled[1],hlTrades=settled[2];
-  if(hc&&hc.ok){
-    var recent=(hc.v||[]).map(function(q){return{t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v}}),map={};
-    for(var i=0;i<a.hl.candles.length;i++){var z=a.hl.candles[i];if(z&&z.t!=null)map[z.t]=z}
-    for(var j=0;j<recent.length;j++){var y=recent[j];if(y&&y.t!=null)map[y.t]=y}
-    a.hl.candles=Object.values(map).sort(function(x,y){return x.t-y.t}).slice(-5000);a.feed.HL_CANDLE='OK';
-  }
-  if(hlL2&&hlL2.ok&&hlL2.v&&Array.isArray(hlL2.v.levels)&&hlL2.v.levels.length>=2){a.hl.book=hlL2.v;a.hl.lastBook=t;a.feed.HL_L2='OK'}
-  if(hlTrades&&hlTrades.ok&&Array.isArray(hlTrades.v)&&hlTrades.v.length){
-    for(var ti=0;ti<hlTrades.v.length;ti++){var tq=hlTrades.v[ti];if(tq&&tq.side&&tq.sz!=null)a.hl.trades.push({time:+tq.time||t,side:(tq.side==='B'||tq.side==='Buy')?'B':'S',sz:+tq.sz})}
-    a.hl.trades=a.hl.trades.slice(-4000);a.hl.lastTrades=t;a.feed.HL_TRADES='OK';
-  }
-  attachAsset(focus);S.hl=a.hl;S.tape=a.tape;S.feed=a.feed;S.lastRest=t;return settled;
+  S.lastRest=t;
+  return{meta:!!metaAll,dexs:Array.isArray(dexs)?dexs.length:0,assets:P.universe.length};
 }
 function reconnectHL(){
   var attempt=0,timer=0;
@@ -1236,7 +1218,7 @@ async function portfolioBootstrap(){
   try{
     for(var li=0;li<list.length;li++){
       var coin=list[li],a=ensureAsset(coin);
-      if(a.hl.candles.length>=needBars){continue}
+      if(a.hl.candles.length>=needBars){try{bootstrapPortfolioModel(coin)}catch(e){}continue}
       var nowT=now(),wait=Math.max(0,(P.bootstrapIntervalSince||0)-nowT);
       if(wait)await sleepMs(wait);
       try{
@@ -1247,6 +1229,7 @@ async function portfolioBootstrap(){
           a.hl.candles=res.map(function(q){return{t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v}}).sort(function(x,y){return x.t-y.t}).slice(-5000);
           if(!finite(a.hl.price)&&a.hl.candles.length)a.hl.price=a.hl.candles[a.hl.candles.length-1].c;
           a.feed.HL_CANDLE='OK';P.bootstrapped[coin]=now();done++;
+          try{bootstrapPortfolioModel(coin);trained++}catch(e){}
         }
       }catch(e){}
       // Keep the aggregate REST weight comfortably below the 1200/min IP budget.
@@ -1429,9 +1412,16 @@ async function boot(){
     }
     try{hydratePersistent().then(function(){migrateV16();dashboard()}).catch(function(e){diagError('persistence',e);dashboard()})}catch(e){diagError('persistence',e)}
     stage('CONNECTING');reconnectHL();
-    restSync().then(function(){return portfolioBootstrap()}).then(function(){portfolioScan();dashboard()}).catch(function(e){diagError('REST_BOOT',e);dashboard()});
+    restSync().then(function(){
+      portfolioScan();
+      dashboard();
+      return portfolioBootstrap();
+    }).then(function(){
+      portfolioScan();
+      dashboard();
+    }).catch(function(e){diagError('REST_BOOT',e);dashboard()});
     setInterval(function(){
-      if(now()-S.lastRest>30000)restSync().then(function(){return portfolioBootstrap()}).then(function(){portfolioScan()}).catch(function(e){diagError('REST_LOOP',e)});
+      if(now()-S.lastRest>30000)restSync().then(function(){portfolioScan();return portfolioBootstrap()}).then(function(){portfolioScan()}).catch(function(e){diagError('REST_LOOP',e)});
       updatePortfolioPositions();updatePaperPositions();
       resolve().catch(function(e){diagError('RESOLVE',e)});
       try{dashboard()}catch(e){diagError('RENDER_LOOP',e)}
