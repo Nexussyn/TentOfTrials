@@ -262,7 +262,7 @@ async function fetchJSON(url,opt,ms){var ctrl=window.AbortController?new AbortCo
 function blankDB(){return{models:{},pending:{},obs:{},grid:{},pretrain:{},pasr:{},paper:{},updatedAt:0}}
 function normalizeDB(d){
   d=d&&typeof d==='object'?d:blankDB();
-  d.models=d.models||{};d.pending=d.pending||{};d.obs=d.obs||{};d.grid=d.grid||{};d.pretrain=d.pretrain||{};d.pasr=d.pasr||{};d.paper=d.paper||{};d.updatedAt=Number(d.updatedAt)||0;
+  d.models=d.models||{};d.pending=d.pending||{};d.obs=d.obs||{};d.grid=d.grid||{};d.pretrain=d.pretrain||{};d.pasr=d.pasr||{};d.paper=d.paper||{};d.profit=d.profit&&typeof d.profit==='object'?d.profit:{global:{},asset:{}};d.profit.global=d.profit.global||{};d.profit.asset=d.profit.asset||{};d.updatedAt=Number(d.updatedAt)||0;
   return d;
 }
 function readStore(k){try{var x=JSON.parse(localStorage.getItem(k)||'null');return normalizeDB(x)}catch(e){return blankDB()}}
@@ -298,6 +298,8 @@ function mergeDB(base,src){
     if(!a||(b.trades||0)>(a.trades||0)||(b.log||[]).length>(a.log||[]).length)base.paper[k]=b;
   });
   Object.keys(src.pasr).forEach(function(k){if(base.pasr[k]==null)base.pasr[k]=src.pasr[k]});
+  Object.keys(src.profit.global||{}).forEach(function(k){base.profit.global[k]=src.profit.global[k]});
+  Object.keys(src.profit.asset||{}).forEach(function(coin){base.profit.asset[coin]=Object.assign(base.profit.asset[coin]||{},src.profit.asset[coin])});
   base.updatedAt=Math.max(base.updatedAt||0,src.updatedAt||0);
   return base;
 }
@@ -383,14 +385,17 @@ var S={
 
 var P={
   assets:[],universe:[],states:{},volume:{},wsSubscribed:{},
-  maxAssets:Infinity,maxSlots:Infinity,maxLeverage:5,maxMarginPct:.20,maxPortfolioRiskPct:.02,maxSameSide:Infinity,
-  maxRoundTripCostBps:24,
-  bootstrapConcurrency:1,bootstrapIntervalMs:60000,bootstrapMinSpacingMs:1800,bootstrapRunning:false,bootstrapIntervalSince:0,h:5,lastScan:0,lastMeta:0,lastBootstrap:0,bootstrapped:{},positions:{},cooldown:{},signalsRows:[],lastOpenRejects:{}
+  focusCoin:'',focusH:5,
+  maxAssets:Infinity,maxSlots:Infinity,maxConcurrentPositions:8,maxLeverage:5,maxMarginPct:.20,maxPortfolioRiskPct:.02,maxSameSide:Infinity,
+  maxRoundTripCostBps:24,minGlobalProfitObs:200,minAssetProfitObs:5,minGlobalModelObs:120,minAssetLiveObs:20,
+  bootstrapConcurrency:1,bootstrapIntervalMs:60000,bootstrapMinSpacingMs:2500,bootstrapRunning:false,bootstrapIntervalSince:0,
+  wsQueue:[],wsWanted:{},wsAcked:{},wsSentAt:{},wsPumpTimer:0,wsGeneration:0,
+  h:5,lastScan:0,lastMeta:0,lastBootstrap:0,bootstrapped:{},positions:{},cooldown:{},signalsRows:[],lastOpenRejects:{}
 };
 function newAssetState(){
   return{
     maxLeverage:NaN,szDecimals:NaN,
-    hl:{price:NaN,book:null,oi:NaN,funding:NaN,candles:[],trades:[],oiHist:[],lastPrice:0,lastBook:0,lastTrades:0,lastCtx:0},
+    hl:{price:NaN,markPx:NaN,oraclePx:NaN,book:null,oi:NaN,funding:NaN,dayNtlVlm:NaN,candles:[],trades:[],oiHist:[],lastPrice:0,lastBook:0,lastTrades:0,lastCtx:0},
     bn:{price:NaN,oi:NaN,funding:NaN,spot:[],perp:[],liq:[],oiHist:[],lastMark:0,lastSpot:0,lastPerp:0,lastLiq:0,lastRest:0},
     tape:[],feed:{HL_WS:'INIT',HL_L2:'INIT',HL_TRADES:'INIT',HL_CANDLE:'INIT',HL_CTX:'INIT',BN_WS:'INIT',BN_REST:'INIT',BN_SPOT:'INIT'}
   };
