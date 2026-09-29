@@ -385,7 +385,7 @@ var P={
   assets:[],universe:[],states:{},volume:{},wsSubscribed:{},
   maxAssets:Infinity,maxSlots:Infinity,maxLeverage:5,maxMarginPct:.20,maxPortfolioRiskPct:.02,maxSameSide:Infinity,
   maxRoundTripCostBps:24,
-  bootstrapConcurrency:12,bootstrapIntervalMs:60000,h:5,lastScan:0,lastMeta:0,lastBootstrap:0,bootstrapped:{},positions:{},cooldown:{},signalsRows:[],lastOpenRejects:{}
+  bootstrapConcurrency:1,bootstrapIntervalMs:60000,bootstrapMinSpacingMs:1800,bootstrapRunning:false,bootstrapIntervalSince:0,h:5,lastScan:0,lastMeta:0,lastBootstrap:0,bootstrapped:{},positions:{},cooldown:{},signalsRows:[],lastOpenRejects:{}
 };
 function newAssetState(){
   return{
@@ -500,7 +500,8 @@ function portfolioScan(){
     try{
       var out=withAsset(coin,function(){S.capital=p.capital;var f=feats(),m=mixed(h,f),pl=orderPlan(h,f,m);return{f:f,m:m,pl:pl}});
       var pl=out.pl,act=(pl.direction==='LONG'||pl.direction==='SHORT')?pl.direction:'NO TRADE',existing=positions[coin];
-      if(act!=='NO TRADE'&&!existing)portfolioOpen(coin,h,out.f,pl);
+      if(act==='NO TRADE')P.lastOpenRejects[coin]=(pl.gateReasons&&pl.gateReasons.length)?pl.gateReasons.join(' · '):'NO_TRADE';
+      else if(!existing)portfolioOpen(coin,h,out.f,pl);
       mk=portfolioMark(coin);existing=portfolioState().positions&&portfolioState().positions[coin];
       rows.push({coin:coin,volume:P.volume[coin]||0,action:act,p:finite(pl.pd)?pl.pd:NaN,edge:finite(pl.edge)?pl.edge:NaN,ev:finite(pl.ev)?pl.ev:NaN,pos:!!existing,
         price:mk.price,entry:existing?existing.entry:(act!=='NO TRADE'?pl.entry:NaN),sl:existing?existing.sl:(act!=='NO TRADE'?pl.sl:NaN),tp:existing?existing.tp:(act!=='NO TRADE'?pl.tp:NaN),
@@ -1065,20 +1066,42 @@ function restSpot(){
     S.bn.lastSpot=now();S.feed.BN_SPOT='OK';
   }).catch(function(){S.feed.BN_SPOT='STALE'});
 }
+function sleepMs(ms){return new Promise(function(resolve){setTimeout(resolve,Math.max(0,ms||0))})}
 async function portfolioBootstrap(){
-  var t=now();if(P.lastBootstrap&&t-P.lastBootstrap<P.bootstrapIntervalMs)return{done:0,assets:P.universe.length};P.lastBootstrap=t;
-  var list=P.universe.slice(),done=0,cc=Math.max(1,P.bootstrapConcurrency);
-  for(var start=0;start<list.length;start+=cc){
-    await Promise.all(list.slice(start,start+cc).map(async function(coin){
-      var a=ensureAsset(coin);if(a.hl.candles.length>=180)return;
+  var t=now(),needBars=Math.min(5000,Math.max(500,P.h+440));
+  if(P.bootstrapRunning)return{done:0,assets:P.universe.length,busy:true};
+  if(P.lastBootstrap&&t-P.lastBootstrap<P.bootstrapIntervalMs)return{done:0,assets:P.universe.length};
+  P.lastBootstrap=t;P.bootstrapRunning=true;
+  var list=P.universe.slice(),done=0,trained=0,starts=0;
+  try{
+    for(var li=0;li<list.length;li++){
+      var coin=list[li],a=ensureAsset(coin);
+      if(a.hl.candles.length>=needBars){continue}
+      var nowT=now(),wait=Math.max(0,(P.bootstrapIntervalSince||0)-nowT);
+      if(wait)await sleepMs(wait);
       try{
-        var end=now()-60000,res=await hl({type:'candleSnapshot',req:{coin:coin,interval:'1m',startTime:end-500*60000,endTime:end}});
-        if(Array.isArray(res)&&res.length>=80){a.hl.candles=res.map(function(q){return{t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v}}).sort(function(x,y){return x.t-y.t}).slice(-1000);if(!finite(a.hl.price))a.hl.price=a.hl.candles[a.hl.candles.length-1].c;a.feed.HL_CANDLE='OK';P.bootstrapped[coin]=t;done++}
+        var end=now()-60000,startTime=end-(needBars+20)*60000;
+        var res=await hl({type:'candleSnapshot',req:{coin:coin,interval:'1m',startTime:startTime,endTime:end}});
+        starts++;
+        if(Array.isArray(res)&&res.length>=Math.min(needBars,80)){
+          a.hl.candles=res.map(function(q){return{t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v}}).sort(function(x,y){return x.t-y.t}).slice(-5000);
+          if(!finite(a.hl.price)&&a.hl.candles.length)a.hl.price=a.hl.candles[a.hl.candles.length-1].c;
+          a.feed.HL_CANDLE='OK';P.bootstrapped[coin]=now();done++;
+        }
       }catch(e){}
-    }));
+      // Keep the aggregate REST weight comfortably below the 1200/min IP budget.
+      var estWeight=20+Math.ceil(needBars/60),spacing=Math.max(P.bootstrapMinSpacingMs,Math.ceil(estWeight*60000/900));
+      P.bootstrapIntervalSince=now()+spacing;
+    }
+    for(var mi=0;mi<list.length;mi++){
+      var c2=list[mi],a2=ensureAsset(c2);
+      if(a2.hl.candles.length>=Math.min(needBars,500))try{if(bootstrapPortfolioModel(c2))trained++}catch(e){}
+    }
+  }finally{
+    P.bootstrapRunning=false;
   }
-  for(var mi=0;mi<list.length;mi++){var c2=list[mi],a2=ensureAsset(c2);if(a2.hl.candles.length>=180)try{bootstrapPortfolioModel(c2)}catch(e){}}
-  if(done)save();return{done:done,assets:list.length};
+  if(done||trained)save();
+  return{done:done,trained:trained,requests:starts,assets:list.length,bars:needBars};
 }
 async function warmStart(){
   var key=S.coin,meta=DB.pretrain[key]||{}; meta.h=meta.h||{};
