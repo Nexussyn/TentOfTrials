@@ -538,7 +538,7 @@ function portfolioScan(){
   }
   rows.sort(function(a,b){return(b.volume||0)-(a.volume||0)});
   P.signalsRows=rows;P.lastScan=now();
-  var focus=candidates[0]||rows.filter(function(x){return x.h&&x.tradeScore>-Infinity}).sort(function(a,b){return(b.tradeScore||-Infinity)-(a.tradeScore||-Infinity))[0];
+  var focus=candidates[0]||rows.filter(function(x){return x.h&&x.tradeScore>-Infinity}).sort(function(a,b){return(b.tradeScore||-Infinity)-(a.tradeScore||-Infinity)})[0];
   if(focus){P.focusCoin=focus.coin;P.focusH=focus.h;attachAsset(focus.coin);S.coin=focus.coin;S.h=focus.h}
   save();renderPortfolio();
 }
