@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Crypto Direction Engine — V16.4.3 CRYPTO-ONLY UNIVERSE</title>
+<title>Crypto Direction Engine — V16.4.4 CRYPTO-ONLY UNIVERSE</title>
 <style>
 :root{--bg:#061016;--p:#0c1a22;--p2:#09161d;--l:#243843;--t:#edf4f7;--m:#8ea3ad;--u:#43d19d;--d:#ff7082;--n:#f0bf55;--c:#67d7ef}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 15% 0,#122a32,#061016 42%,#050b0f);color:var(--t);font:14px/1.4 system-ui,-apple-system,Segoe UI,sans-serif}
@@ -32,7 +32,7 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
 <body>
 <header class="top">
   <div>
-    <div class="brand">CRYPTO DIRECTION ENGINE · V16.4.3 CRYPTO-ONLY UNIVERSE</div>
+    <div class="brand">CRYPTO DIRECTION ENGINE · V16.4.4 CRYPTO-ONLY UNIVERSE</div>
     <div class="tag">Hyperliquid natif · univers crypto perpétuel primaire uniquement · HIP-3/XYZ exclus · sélection cross-sectionnelle · apprentissage OOS global · aucune exécution réelle</div>
   </div>
   <div class="ctrl">
@@ -1531,7 +1531,7 @@ function renderCapital(){
   try{
     var p=portfolioState(),a=portfolioAudit(),all=0;for(var hi=0;hi<H.length;hi++)all+=globalStatsFor(H[hi]).n;
     var auditCls=a.ok?'up':'down',auditTxt=(a.ok?'RECONCILE OK':'RECONCILE ERROR')+' · écart '+a.delta.toFixed(6)+' USDC';
-    $('capitalCards').innerHTML='<div class="capitalBox" style="grid-column:1/-1"><div class="title"><b>V16.4.3 · CAPITAL RÉEL-ÉQUIVALENT · '+P.universe.length+' ACTIFS</b><span class="badge '+auditCls+'">'+auditTxt+'</span></div><b class="'+(p.capital>=p.capitalBase?'up':'down')+'">'+nfmt(p.capital,2)+' USDC</b><div class="capitalSub">Départ '+nfmt(p.capitalBase,2)+' · réalisé net '+nfmt(p.realizedNet,2)+' · DD '+(p.maxDD*100).toFixed(2)+'% · frais '+nfmt(p.fees,2)+' · trades '+p.trades+' · positions '+Object.keys(p.positions||{}).length+'/'+P.maxConcurrentPositions+'</div></div>'+
+    $('capitalCards').innerHTML='<div class="capitalBox" style="grid-column:1/-1"><div class="title"><b>V16.4.4 · CAPITAL RÉEL-ÉQUIVALENT · '+P.universe.length+' ACTIFS</b><span class="badge '+auditCls+'">'+auditTxt+'</span></div><b class="'+(p.capital>=p.capitalBase?'up':'down')+'">'+nfmt(p.capital,2)+' USDC</b><div class="capitalSub">Départ '+nfmt(p.capitalBase,2)+' · réalisé net '+nfmt(p.realizedNet,2)+' · DD '+(p.maxDD*100).toFixed(2)+'% · frais '+nfmt(p.fees,2)+' · trades '+p.trades+' · positions '+Object.keys(p.positions||{}).length+'/'+P.maxConcurrentPositions+'</div></div>'+
       H.map(function(h){var s=globalStatsFor(h);return'<div class="capitalBox"><div class="title"><b>OOS '+hlabel(h)+'</b><span class="badge">'+s.n+' observations</span></div><b>'+ (finite(s.net)?(s.net*10000).toFixed(2)+' bps':'—') +'</b><div class="capitalSub">Brier '+nfmt(s.b,4)+' · Hit '+pct(s.hit,1)+' · calibration profit L '+profitCount(h,'LONG')+' / S '+profitCount(h,'SHORT')+'</div></div>'}).join('');
   }catch(e){$('capitalCards').innerHTML='<div class="note">Performance indisponible temporairement : '+String(e.message||e)+'</div>';}
 }
@@ -1547,12 +1547,20 @@ function selectFocus(){
   rows.sort(function(a,b){var aa=finite(a.tradeScore)?a.tradeScore:-Infinity,bb=finite(b.tradeScore)?b.tradeScore:-Infinity;return bb-aa});
   var best=rows[0];
   if(best){P.focusCoin=best.coin;P.focusH=+best.h||5;attachAsset(best.coin);S.coin=best.coin;S.h=P.focusH;return best}
+  /* During bootstrap/calibration, keep a live market visible instead of rendering a dead global state. */
+  for(var i=0;i<P.universe.length;i++){
+    var coin=P.universe[i],a=ensureAsset(coin);
+    if(a&&finite(a.hl.price)&&fresh(a.hl.lastPrice,15000)){
+      P.focusCoin=coin;P.focusH=5;attachAsset(coin);S.coin=coin;S.h=5;
+      return{coin:coin,h:5,price:a.hl.price,tradeScore:-Infinity,action:'CALIBRATION'};
+    }
+  }
   return null;
 }
 function dashboard(){
   var focus=selectFocus();
   if(!focus){
-    $('dir').textContent=P.universe.length?'CALIBRATION':'CONNEXION';$('dir').className='dir neu';$('prob').textContent='—';$('headline').textContent=P.universe.length?'calibration du rendement net réalisée sur tout l’univers · NO TRADE probatoire':'attente de la découverte de l’univers Hyperliquid';
+    $('dir').textContent=P.universe.length?'WAITING DATA':'CONNEXION';$('dir').className='dir neu';$('prob').textContent='—';$('headline').textContent=P.universe.length?'marchés découverts · attente des flux prix/BBO et de la calibration OOS':'attente de la découverte de l’univers Hyperliquid';
     $('act').textContent='NO TRADE';$('ord').textContent='WAIT';$('entry').textContent='—';$('sl').textContent='—';$('tp').textContent='—';$('rr').textContent='—';$('size').textContent='—';$('whyOrder').textContent='Le moteur n’emploie pas un actif de référence fixe : il attend les données de l’univers et la calibration OOS réelle.';
     try{renderCapital()}catch(e){}try{renderPortfolio()}catch(e){}try{renderHealth()}catch(e){}try{journal()}catch(e){}return;
   }
@@ -1579,22 +1587,22 @@ function dashboard(){
   $('c4').textContent=finite(f.pasr)?f.pasr.toFixed(3):'—';$('pasrW').textContent=w.toFixed(4);$('deltaB').textContent=finite(st.delta)?st.delta.toFixed(4):'—';$('pasrN').textContent=st.n;$('pasrV').textContent=pv;$('pasrState').textContent=pv;$('bucketN').textContent=f.pasrN;
   $('hist').textContent=globalPretrainCount(S.h);$('live').textContent=globalStatsFor(S.h).n;$('brier').textContent=nfmt(globalStatsFor(S.h).b,4);$('logloss').textContent=nfmt(globalStatsFor(S.h).ll,4);$('hit').textContent=pct(globalStatsFor(S.h).hit,1);$('roll').textContent=nfmt(globalStatsFor(S.h).roll,4);$('pend').textContent=(DB.pending[S.coin+'_'+S.h]||[]).length;
   var preN=globalPretrainCount(S.h),liveN=globalStatsFor(S.h).n,gBase=globalModel(S.h,'base'),gFull=globalModel(S.h,'full');
-  $('learnState').textContent=(preN>0||liveN>0)?(liveN<P.minGlobalProfitObs?'LEARNING · OOS':'LEARNING · ADAPTIVE'):'WAITING FOR DATA';
+  $('learnState').textContent=(preN>0||liveN>0)?(liveN<30?'LEARNING · OOS':'LEARNING · ADAPTIVE'):'WAITING FOR DATA';
   $('learningNote').textContent='PRETRAIN '+preN+' · LIVE OOS '+liveN+' · global base '+(gBase.seen||0)+' updates ('+(gBase.liveSeen||0)+' live) · full '+(gFull.seen||0)+' updates ('+(gFull.liveSeen||0)+' live) · pending '+Object.keys(DB.pending||{}).reduce(function(s,k){return s+(DB.pending[k]||[]).filter(function(x){return x&&!x.paperResolved}).length},0)+'. Apprentissage fondé uniquement sur données historiques réellement chargées et prévisions OOS réellement résolues.';
   $('kPrice').textContent=nfmt(S.hl.price,2);$('kDQ').textContent=q+'/100';$('kMix').textContent='GLOBAL '+(m.globalSeen||0)+' live · LOCAL '+(model(S.h,'full').liveSeen||0)+' live · PROFIT OOS '+profitCount(S.h,dir);$('kEdge').textContent=finite(pl.blendedEvBps)?((pl.blendedEvBps>=0?'+':'')+pl.blendedEvBps.toFixed(2)+' bps'):'—';
   var ages=[S.hl.lastBook,S.hl.lastTrades,S.hl.lastCtx].filter(function(x){return x>0}).map(function(x){return Math.max(0,now()-x)/1000});$('kFresh').textContent=ages.length?Math.round(Math.max.apply(null,ages))+'s':'—';
   $('chartInfo').textContent='HL '+nfmt(S.hl.price)+' · focus dynamique '+P.focusCoin;
   try{renderCapital()}catch(e){}try{renderPortfolio()}catch(e){}try{renderHealth()}catch(e){}try{journal()}catch(e){}
-  $('audit').textContent='V16.4.3 = univers crypto-only et comptabilité propre. Seul le perpétuel natif Hyperliquid (DEX "") est admis; les DEX HIP-3, dont XYZ, sont exclus dès la découverte, des flux WS et du portefeuille. Le changement d’univers force un nouvel epoch de calibration;  Le capital V15/V16 précédent est archivé et exclu du nouveau rendement; le modèle repart de zéro sur les données de prix puis apprend uniquement sur les observations live OOS valides. Chaque marché est évalué sur les horizons '+TRADE_H.join('/')+' min, puis le meilleur horizon par actif est comparé aux autres actifs. Les shadow forecasts OOS sont créés même lorsque NO TRADE est affiché; à résolution, leur rendement net après frais, slippage et spread alimente la calibration globale et locale. Aucune donnée Binance n’est nécessaire à la décision. Les nouvelles positions sont limitées aux meilleures opportunités; la phase SEED est strictement shadow-only : elle ne mobilise aucun capital; elle collecte les résultats OOS de la politique TP/SL avant autorisation de FULL, tandis que le portefeuille peut utiliser jusqu’à 8 positions dans le budget de risque agrégé; un time-stop empêche une position de monopoliser le capital. Rentabilité non présumée : elle doit être démontrée par le rendement net OOS.';
+  $('audit').textContent='V16.4.4 = univers crypto-only et comptabilité propre. Seul le perpétuel natif Hyperliquid (DEX "") est admis; les DEX HIP-3, dont XYZ, sont exclus dès la découverte, des flux WS et du portefeuille. Le changement d’univers force un nouvel epoch de calibration;  Le capital V15/V16 précédent est archivé et exclu du nouveau rendement; le modèle repart de zéro sur les données de prix puis apprend uniquement sur les observations live OOS valides. Chaque marché est évalué sur les horizons '+TRADE_H.join('/')+' min, puis le meilleur horizon par actif est comparé aux autres actifs. Les shadow forecasts OOS sont créés même lorsque NO TRADE est affiché; à résolution, leur rendement net après frais, slippage et spread alimente la calibration globale et locale. Aucune donnée Binance n’est nécessaire à la décision. Les nouvelles positions sont limitées aux meilleures opportunités; la phase SEED est strictement shadow-only : elle ne mobilise aucun capital; elle collecte les résultats OOS de la politique TP/SL avant autorisation de FULL, tandis que le portefeuille peut utiliser jusqu’à 8 positions dans le budget de risque agrégé; un time-stop empêche une position de monopoliser le capital. Rentabilité non présumée : elle doit être démontrée par le rendement net OOS.';
 }
 function migrateV16(){
-  if(DB.accountingEpoch===16.43)return;
+  if(DB.accountingEpoch===16.44)return;
   var oldP=portfolioState();
   DB.legacyV15=DB.legacyV15||{portfolio:oldP,profit:DB.profit||{},obs:DB.obs||{}};
   DB.legacyV16=DB.legacyV16||{portfolio:oldP,profit:DB.profit||{},exec:DB.exec||{},obs:DB.obs||{}};
   DB.legacyV162=DB.legacyV162||{portfolio:oldP,profit:DB.profit||{},exec:DB.exec||{},obs:DB.obs||{}};
-  // V16.4.3 démarre un nouvel epoch propre : les anciens portefeuille et calibrations de politique sont archivés et exclus.
-  DB.portfolio={capitalBase:S.capital,capital:S.capital,peak:S.capital,maxDD:0,realizedNet:0,fees:0,wins:0,losses:0,trades:0,positions:{},log:[],epoch:16.43,startedAt:now()};
+  // V16.4.4 démarre un nouvel epoch propre : les anciens portefeuille et calibrations de politique sont archivés et exclus.
+  DB.portfolio={capitalBase:S.capital,capital:S.capital,peak:S.capital,maxDD:0,realizedNet:0,fees:0,wins:0,losses:0,trades:0,positions:{},log:[],epoch:16.44,startedAt:now()};
   DB.profit={global:{},asset:{}};
   DB.exec={global:{},asset:{}};
   DB.obs={};
@@ -1603,7 +1611,7 @@ function migrateV16(){
   DB.models={};
   DB.pretrain={};
   DB.profitBackfillVersion=0;
-  DB.accountingEpoch=16.43;
+  DB.accountingEpoch=16.44;
   save();
 }
 function syntheticState(){
