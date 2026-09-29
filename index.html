@@ -538,6 +538,39 @@ function renderPortfolio(){
 function newM(){return{w:Array.from({length:3},function(){return Array(30).fill(0)}),b:[0,0,0],seen:0,liveSeen:0,temp:1,obs:[]}}
 function model(h,k,scope){var key=(scope||S.coin)+'_'+h;if(!DB.models[key])DB.models[key]={base:newM(),full:newM()};var m=DB.models[key][k]||newM();if(!m.w||m.w.length!==3||m.w.some(function(row){return !row||row.length!==30})){var oldW=m.w||[];m.w=Array.from({length:3},function(_,i){var row=(oldW[i]||[]).slice(0,30);while(row.length<30)row.push(0);return row});m.b=m.b||[0,0,0];m.seen=m.seen||0;m.liveSeen=m.liveSeen==null?0:m.liveSeen;m.temp=m.temp||1;m.obs=m.obs||[]}DB.models[key][k]=m;return m}
 function globalModel(h,k){return model(h,k,'__GLOBAL__')}
+function profitBucket(store,h,dir,target){
+  store=store||{};
+  var key=String(h)+'_'+dir+'_'+target;
+  if(!store[key])store[key]={n:0,mean:0,m2:0,lastTs:0};
+  return store[key];
+}
+function updateProfitCalibration(h,coin,dir,target,netRet){
+  if((dir!=='LONG'&&dir!=='SHORT')||!finite(netRet)||!Number.isInteger(target)||target<0||target>2)return;
+  DB.profit=DB.profit||{global:{},asset:{}};DB.profit.global=DB.profit.global||{};DB.profit.asset=DB.profit.asset||{};
+  var g=profitBucket(DB.profit.global,h,dir,target),a0=(DB.profit.asset[coin]=DB.profit.asset[coin]||{}),a=profitBucket(a0,h,dir,target);
+  function add(x){
+    x.n=Math.min((x.n||0)+1,5000);
+    var k=x.n<400?1/x.n:.0025,old=x.mean||0;
+    x.mean=old+k*(netRet-old);x.m2=(x.m2||0)+k*(netRet-old)*(netRet-x.mean);x.lastTs=now();
+  }
+  add(g);add(a);save();
+}
+function profitCount(h,dir){
+  var s=0,g=DB.profit&&DB.profit.global||{};
+  for(var t=0;t<3;t++){var x=g[String(h)+'_'+dir+'_'+t];if(x)s+=x.n||0}
+  return s;
+}
+function profitExpectation(h,coin,dir,p){
+  if(!Array.isArray(p)||p.length!==3)return{ret:NaN,n:0,localN:0,globalN:profitCount(h,dir)};
+  var g=DB.profit&&DB.profit.global||{},a0=DB.profit&&DB.profit.asset&&DB.profit.asset[coin]||{},ret=0,totalN=0,localN=0;
+  for(var t=0;t<3;t++){
+    var key=String(h)+'_'+dir+'_'+t,gg=g[key],aa=a0[key],gn=gg&&gg.n||0,an=aa&&aa.n||0;
+    if(!gn)continue;
+    var gm=Number(gg.mean)||0,lw=clamp(an/40,0,.60),am=an?Number(aa.mean)||0:gm,mu=gm*(1-lw)+am*lw;
+    ret+=p[t]*mu;totalN+=gn;localN+=an;
+  }
+  return{ret:totalN?ret:NaN,n:totalN,localN:localN,globalN:profitCount(h,dir)};
+}
 function sigmoid(z){var m=Math.max.apply(null,z),e=z.map(function(v){return Math.exp(clamp(v-m,-30,30))}),s=e.reduce(function(a,b){return a+b},0);return e.map(function(v){return v/s})}
 function ema(a,n){if(!a.length)return NaN;var e=a[0],k=2/(n+1);for(var i=1;i<a.length;i++)e=a[i]*k+e*(1-k);return e}
 function ret(a,n){return a.length>n?a[a.length-1]/a[a.length-1-n]-1:NaN}
