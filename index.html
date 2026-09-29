@@ -386,7 +386,7 @@ var P={
   assets:[],universe:[],states:{},volume:{},wsSubscribed:{},
   focusCoin:'',focusH:5,
   maxAssets:Infinity,maxSlots:Infinity,maxConcurrentPositions:4,maxLeverage:5,maxMarginPct:.20,maxPortfolioRiskPct:.02,maxSameSide:Infinity,
-  maxRoundTripCostBps:24,minNetEvBps:3,minGlobalProfitObs:200,minAssetProfitObs:5,minGlobalModelObs:120,minAssetLiveObs:20,timeStopMultiple:2,
+  maxRoundTripCostBps:24,minNetEvBps:3,seedNetEvBps:6,seedProfitObs:5,minSeedDQ:60,minGlobalProfitObs:200,minAssetProfitObs:5,minGlobalModelObs:120,minAssetLiveObs:20,timeStopMultiple:2,
   bootstrapConcurrency:1,bootstrapIntervalMs:60000,bootstrapMinSpacingMs:2500,bootstrapRunning:false,bootstrapIntervalSince:0,
   wsQueue:[],wsWanted:{},wsAcked:{},wsSentAt:{},wsSubDefs:{},wsPumpTimer:0,wsWatchdog:0,wsLastData:0,wsGeneration:0,
   perpDexNames:[''],universeByDex:{},resolveRestNext:0,
@@ -431,7 +431,8 @@ function portfolioOpen(coin,h,f,pl){
   var reject=function(reason){P.lastOpenRejects[coin]=reason;return false},p=portfolioState(),ks=Object.keys(p.positions||{}),t=now(),a=ensureAsset(coin);
   if(!marketPriceConsistent(a,a.hl.book,a.hl.bbo))return reject('BOOK_PRICE_MISMATCH');
   if(!fresh(a.hl.lastBbo,7000))return reject('BBO_STALE');
-  if(!fresh(a.hl.lastBook,7000)||!fresh(a.hl.lastTrades,12000))return reject('MICROSTRUCTURE_REQUIRED');
+  var seedMode=pl&&pl.mode==='SEED';
+  if(!seedMode&&(!fresh(a.hl.lastBook,7000)||!fresh(a.hl.lastTrades,12000)))return reject('MICROSTRUCTURE_REQUIRED');
   if(a.dex&&a.dex!=='')return reject('DEX_SHADOW_ONLY');
   if(ks.length>=P.maxConcurrentPositions)return reject('POSITION_CAP');
   if(p.positions[coin])return reject('ALREADY_OPEN');
@@ -809,24 +810,30 @@ function orderPlan(h,f,m){
   var costPerUnit=(finite(entry)&&finite(sl)?executionCostPerUnit(entry,sl,spreadBps(f)):NaN),sz=riskDist>0&&finite(costPerUnit)?riskCash/(riskDist+costPerUnit):NaN;
   var classEv=entry&&a&&finite(costBps)?(pd*(a*pair.tp/entry)-po*(a*pair.sl/entry)-costBps/10000):NaN;
   var pe=profitExpectation(h,S.coin,dir,m.p),profitEv=finite(pe.ret)?pe.ret:NaN,profitObs=pe.globalN||0,localProfitObs=pe.localN||0;
+  var profitReady=profitObs>=P.minGlobalProfitObs;
+  var seedMode=!profitReady&&profitObs>=P.seedProfitObs;
   var blendW=clamp(profitObs/300,0,1),blendedEv=finite(classEv)&&finite(profitEv)?classEv*(1-blendW)+profitEv*blendW:finite(profitEv)?profitEv:classEv;
   var es=m.score,align=finite(es)?(dir==='LONG'?es:-es):NaN,modelSeen=globalModel(h,'base').seen||0;
   var gateReasons=[];
-  if(!finite(entry)||!finite(a)||!finite(f.l2)||!finite(sl)||!finite(tp)||!finite(rr))gateReasons.push('LIVE_DATA');
-  if(!fresh(S.hl.lastBbo,7000)||!fresh(S.hl.lastBook,7000)||!fresh(S.hl.lastTrades,12000))gateReasons.push('MICROSTRUCTURE_REQUIRED');
-  if(q<70)gateReasons.push('DQ<70');
+  if(!finite(entry)||!finite(a)||!finite(sl)||!finite(tp)||!finite(rr))gateReasons.push('LIVE_DATA');
+  if(!fresh(S.hl.lastBbo,7000))gateReasons.push('BBO_REQUIRED');
+  if(!seedMode&&(!fresh(S.hl.lastBook,7000)||!fresh(S.hl.lastTrades,12000)))gateReasons.push('MICROSTRUCTURE_REQUIRED');
+  if(seedMode&&q<P.minSeedDQ)gateReasons.push('SEED_DQ<'+P.minSeedDQ);
+  if(!seedMode&&q<70)gateReasons.push('DQ<70');
   if(modelSeen<P.minGlobalModelObs)gateReasons.push('GLOBAL_MODEL_WARMUP');
-  if(profitObs<P.minGlobalProfitObs)gateReasons.push('PROFIT_CALIBRATION '+profitObs+'/'+P.minGlobalProfitObs);
+  if(!profitReady&&!seedMode)gateReasons.push('PROFIT_CALIBRATION '+profitObs+'/'+P.minGlobalProfitObs);
   if(!finite(costBps)||costBps>P.maxRoundTripCostBps)gateReasons.push('cost>'+P.maxRoundTripCostBps+'bps');
-  if(!finite(blendedEv)||blendedEv*10000<P.minNetEvBps)gateReasons.push('NET_EV<'+P.minNetEvBps+'bps');
-  var gate=gateReasons.length>0,confidence=clamp(Math.min(profitObs/P.minGlobalProfitObs,localProfitObs/Math.max(1,P.minAssetProfitObs)+.2),0,1);
+  var minEvBps=seedMode?P.seedNetEvBps:P.minNetEvBps;
+  if(!finite(blendedEv)||blendedEv*10000<minEvBps)gateReasons.push('NET_EV<'+minEvBps+'bps');
+  var gate=gateReasons.length>0;
+  var confidence=seedMode?clamp(profitObs/Math.max(1,P.seedProfitObs),.35,1):clamp(Math.min(profitObs/P.minGlobalProfitObs,localProfitObs/Math.max(1,P.minAssetProfitObs)+.2),0,1);
   var tradeScore=finite(blendedEv)?blendedEv*Math.max(.25,confidence)*(q/100): -Infinity;
   return{
-    direction:gate?'NO TRADE':dir,candidate:dir,pd:pd,po:po,edge:pd-po,evidence:es,align:align,q:q,costBps:costBps,
+    direction:gate?'NO TRADE':dir,candidate:dir,mode:seedMode?'SEED':'FULL',pd:pd,po:po,edge:pd-po,evidence:es,align:align,q:q,costBps:costBps,
     profitEv:profitEv,profitEvBps:finite(profitEv)?profitEv*10000:NaN,blendedEv:blendedEv,blendedEvBps:finite(blendedEv)?blendedEv*10000:NaN,
     profitObs:profitObs,localProfitObs:localProfitObs,modelSeen:modelSeen,tradeScore:tradeScore,
     entry:gate?NaN:entry,sl:gate?NaN:sl,tp:gate?NaN:tp,rr:gate?NaN:rr,size:gate?NaN:sz,ev:gate?NaN:blendedEv,evR:gate?NaN:classEv,
-    pair:pair,gateReasons:gateReasons,reason:gate?'Portail fermé : '+gateReasons.join(' · '):'Portail ouvert : rendement net calibré sur les réalisations de tout l’univers.'
+    pair:pair,gateReasons:gateReasons,reason:gate?'Portail fermé : '+gateReasons.join(' · '):(seedMode?'Portail SEED ouvert : EV nette exigeante en attendant la calibration complète.':'Portail FULL ouvert : rendement net calibré sur les réalisations de tout l’univers.')
   };
 }
 function hlabel(h){return h===1440?'1j':h===60?'1h':h===240?'4h':h+'m'}
@@ -1444,9 +1451,9 @@ function dashboard(){
   $('act').textContent=dir==='LONG'?'BUY':dir==='SHORT'?'SELL':'NO TRADE';$('ord').textContent=dir==='NO TRADE'?'WAIT':'READY';
   $('entry').textContent=nfmt(pl.entry);$('sl').textContent=nfmt(pl.sl);$('tp').textContent=nfmt(pl.tp);$('rr').textContent=finite(pl.rr)?'1:'+pl.rr.toFixed(2):'—';$('size').textContent=finite(pl.size)?pl.size.toFixed(5):'—';
   $('whyOrder').textContent=pl.reason;
-  $('gateInfo').textContent='Candidat '+pl.candidate+' · prob '+(pl.pd*100).toFixed(1)+'% · EV class. '+(finite(pl.evR)?(pl.evR*10000).toFixed(2)+' bps':'—')+' · EV nette calibrée '+(finite(pl.blendedEvBps)?pl.blendedEvBps.toFixed(2)+' bps':'—')+' · OOS '+pl.profitObs+' global / '+pl.localProfitObs+' actif · coût '+(finite(pl.costBps)?pl.costBps.toFixed(2):'—')+' bps · TP '+(pl.pair?pl.pair.tp:'—')+' ATR · SL '+(pl.pair?pl.pair.sl:'—')+' ATR';
+  $('gateInfo').textContent='Candidat '+pl.candidate+' · prob '+(pl.pd*100).toFixed(1)+'% · EV class. '+(finite(pl.evR)?(pl.evR*10000).toFixed(2)+' bps':'—')+' · EV nette calibrée '+(finite(pl.blendedEvBps)?pl.blendedEvBps.toFixed(2)+' bps':'—')+' · OOS '+pl.profitObs+' global / '+pl.localProfitObs+' actif · mode '+pl.mode+' · coût '+(finite(pl.costBps)?pl.costBps.toFixed(2):'—')+' bps · TP '+(pl.pair?pl.pair.tp:'—')+' ATR · SL '+(pl.pair?pl.pair.sl:'—')+' ATR';
   $('headline').textContent=dir==='NO TRADE'?'surveillance de '+P.focusCoin+' · '+hlabel(S.h)+' · '+(pl.gateReasons||[]).join(' · '):'opportunité '+dir+' sur '+P.focusCoin+' · '+hlabel(S.h);
-  $('invalidate').textContent='Invalidation : données live insuffisantes, modèle global non mûr, calibration de rendement net insuffisante, coût > '+P.maxRoundTripCostBps+' bps ou EV nette < '+P.minNetEvBps+' bps.';
+  $('invalidate').textContent='Invalidation : données BBO/prix insuffisantes, modèle global non mûr, DQ seed insuffisante, calibration complète insuffisante hors SEED, coût > '+P.maxRoundTripCostBps+' bps ou EV nette sous le seuil actif.';
   renderEvidence(f,m);renderBook(f);
   $('oi').textContent=nfmt(S.hl.oi,0);var old=S.hl.oiHist.filter(function(q){return q.t<=now()-5*60000}).slice(-1)[0];$('doi').textContent=old&&finite(S.hl.oi)?pct(S.hl.oi/old.v-1):'—';
   $('fund').textContent=pct(S.hl.funding,4);$('basis').textContent=fresh(S.hl.lastCtx,30000)&&finite(S.hl.markPx)&&finite(S.hl.oraclePx)&&S.hl.oraclePx?((S.hl.markPx/S.hl.oraclePx-1)*10000).toFixed(2)+' bps':'—';
