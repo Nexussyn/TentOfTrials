@@ -389,6 +389,7 @@ var P={
   maxRoundTripCostBps:24,minNetEvBps:3,minGlobalProfitObs:200,minAssetProfitObs:5,minGlobalModelObs:120,minAssetLiveObs:20,timeStopMultiple:2,
   bootstrapConcurrency:1,bootstrapIntervalMs:60000,bootstrapMinSpacingMs:2500,bootstrapRunning:false,bootstrapIntervalSince:0,
   wsQueue:[],wsWanted:{},wsAcked:{},wsSentAt:{},wsSubDefs:{},wsPumpTimer:0,wsWatchdog:0,wsGeneration:0,
+  perpDexNames:[''],universeByDex:{},
   h:5,lastScan:0,lastMeta:0,lastBootstrap:0,bootstrapped:{},positions:{},cooldown:{},signalsRows:[],lastOpenRejects:{}
 };
 function newAssetState(){
@@ -1029,20 +1030,46 @@ function pasrVerdict(h){
 async function hl(body){
   return fetchJSON(HLAPI,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)},7000);
 }
-function updatePortfolioUniverse(ctx){
-  if(!ctx||!ctx[0]||!Array.isArray(ctx[0].universe))return;
-  var u=ctx[0].universe,ac=Array.isArray(ctx[1])?ctx[1]:[],rank=[];
-  for(var i=0;i<u.length;i++){
-    var meta=u[i]||{},name=meta.name,x=ac[i]||{},vol=+x.dayNtlVlm,lev=+meta.maxLeverage;
-    if(name&&meta.isDelisted!==true&&(!finite(lev)||lev>0))rank.push({coin:name,vol:finite(vol)?vol:0,oi:+x.openInterest,funding:+x.funding,markPx:+x.markPx,oraclePx:+x.oraclePx});
+function updateAllDexUniverse(metaAll){
+  if(!Array.isArray(metaAll)||!metaAll.length)return;
+  var rank=[],byDex={},names=P.perpDexNames||[''];
+  for(var bi=0;bi<metaAll.length;bi++){
+    var meta=metaAll[bi]||{},dex=names[bi]!=null?String(names[bi]):(bi===0?'':'dex'+bi);
+    if(!Array.isArray(meta.universe))continue;
+    var list=[];
+    for(var ui=0;ui<meta.universe.length;ui++){
+      var x=meta.universe[ui]||{},name=x.name,lev=+x.maxLeverage;
+      if(!name||x.isDelisted===true||finite(lev)&&lev<=0)continue;
+      list.push(name);
+      var a=ensureAsset(name);a.dex=dex;a.maxLeverage=finite(lev)?lev:NaN;a.szDecimals=finite(+x.szDecimals)?+x.szDecimals:NaN;
+      rank.push({coin:name,dex:dex,vol:finite(a.hl.dayNtlVlm)?a.hl.dayNtlVlm:0});
+    }
+    byDex[dex]=list;
   }
-  rank.sort(function(a,b){return b.vol-a.vol});
   var next=[],seen={};
-  for(var j=0;j<rank.length;j++){var coin=rank[j].coin;if(!coin||seen[coin])continue;seen[coin]=true;next.push(coin);ensureAsset(coin)}
-  P.universe=next;P.assets=next.slice();P.volume={};
-  for(var k=0;k<rank.length;k++){P.volume[rank[k].coin]=rank[k].vol;var a=ensureAsset(rank[k].coin),metaK=u.find(function(z){return z&&z.name===rank[k].coin})||{};a.maxLeverage=finite(+metaK.maxLeverage)?+metaK.maxLeverage:NaN;a.szDecimals=finite(+metaK.szDecimals)?+metaK.szDecimals:NaN;if(finite(rank[k].oi))a.hl.oi=rank[k].oi;if(finite(rank[k].funding))a.hl.funding=rank[k].funding;if(finite(rank[k].markPx))a.hl.markPx=rank[k].markPx;if(finite(rank[k].oraclePx))a.hl.oraclePx=rank[k].oraclePx;if(!a.hl.lastCtx)a.hl.lastCtx=now()}
+  for(var ri=0;ri<rank.length;ri++){var c=rank[ri].coin;if(seen[c])continue;seen[c]=true;next.push(c)}
+  P.universe=next;P.assets=next.slice();P.volume={};P.universeByDex=byDex;
+  for(var rj=0;rj<rank.length;rj++){var z=rank[rj];P.volume[z.coin]=Math.max(P.volume[z.coin]||0,z.vol||0)}
   P.maxSlots=Math.max(1,P.universe.length);P.maxAssets=P.universe.length;P.lastMeta=now();
   if(S.hlSocket&&S.hlSocket.readyState===1)subscribeNewPortfolioAssets();
+}
+function updateAllDexCtxs(payload){
+  var groups=payload&&payload.ctxs;
+  if(!groups)return;
+  var rows=Array.isArray(groups)?groups:Object.keys(groups).map(function(d){return[d,groups[d]]});
+  for(var gi=0;gi<rows.length;gi++){
+    var dex=String(rows[gi][0]||''),ctxs=rows[gi][1]||[],coins=P.universeByDex[dex]||[];
+    for(var ci=0;ci<ctxs.length;ci++){
+      var q=ctxs[ci]||{},coin=coins[ci];if(!coin)continue;
+      var a=ensureAsset(coin),px=finite(+q.midPx)?+q.midPx:(finite(+q.markPx)?+q.markPx:NaN);
+      if(finite(px)){a.hl.price=px;a.hl.lastPrice=now()}
+      if(finite(+q.markPx))a.hl.markPx=+q.markPx;if(finite(+q.oraclePx))a.hl.oraclePx=+q.oraclePx;
+      if(finite(+q.dayNtlVlm))a.hl.dayNtlVlm=+q.dayNtlVlm;if(finite(+q.openInterest))a.hl.oi=+q.openInterest;
+      if(finite(+q.funding))a.hl.funding=+q.funding;
+      a.hl.lastCtx=now();a.feed.HL_CTX='OK';
+      if(dex==='')P.volume[coin]=finite(+q.dayNtlVlm)?+q.dayNtlVlm:(P.volume[coin]||0);
+    }
+  }
 }
 function subKey(s){
   return String(s&&s.type||'')+':'+String(s&&s.coin||'')+':'+String(s&&s.interval||'')+':'+String(s&&s.dex||'');
@@ -1070,11 +1097,11 @@ function pumpSubscriptions(ws){
 function subscribeNewPortfolioAssets(){
   var ws=S.hlSocket;if(!ws||ws.readyState!==1)return;
   queueSubscription({type:'allMids'});
+  queueSubscription({type:'allDexsAssetCtxs'});
   var list=P.universe.slice();
-  // Stage 1: every market gets BBO/L2 + trades first. Stage 2: context + candles enrich the same universe.
+  // Stage 1: every market gets order book + trades. Stage 2: candles enrich the same universe.
   for(var i=0;i<list.length;i++)queueSubscription({type:'l2Book',coin:list[i]});
   for(var j=0;j<list.length;j++)queueSubscription({type:'trades',coin:list[j]});
-  for(var k=0;k<list.length;k++)queueSubscription({type:'activeAssetCtx',coin:list[k]});
   for(var q=0;q<list.length;q++)queueSubscription({type:'candle',coin:list[q],interval:'1m'});
   pumpSubscriptions(ws);
 }
@@ -1133,6 +1160,9 @@ function reconnectHL(){
         if(m.channel==='subscriptionResponse'&&m.data){
           var ack=subKey(m.data);
           if(ack){P.wsAcked[ack]=t;delete P.wsWanted[ack];delete P.wsSentAt[ack];}
+          pumpSubscriptions(ws);
+        }else if(m.channel==='allDexsAssetCtxs'&&m.data){
+          updateAllDexCtxs(m.data);
           pumpSubscriptions(ws);
         }else if(m.channel==='allMids'&&m.data&&m.data.mids){
           Object.keys(m.data.mids).forEach(function(coin){var a=ensureAsset(coin),px=+m.data.mids[coin];if(finite(px)){a.hl.price=px;a.hl.lastPrice=t;a.tape.push({t:t,p:px});a.tape=a.tape.slice(-12000)}});
