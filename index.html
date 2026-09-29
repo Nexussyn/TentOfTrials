@@ -385,8 +385,8 @@ var S={
 var P={
   assets:[],universe:[],states:{},volume:{},wsSubscribed:{},
   focusCoin:'',focusH:5,
-  maxAssets:Infinity,maxSlots:Infinity,maxConcurrentPositions:4,maxLeverage:5,maxMarginPct:.20,maxPortfolioRiskPct:.02,maxSameSide:Infinity,
-  maxRoundTripCostBps:24,minNetEvBps:3,seedNetEvBps:8,seedProfitObs:0,minSeedDQ:60,minGlobalProfitObs:200,minAssetProfitObs:5,minGlobalModelObs:120,minAssetLiveObs:20,timeStopMultiple:2,
+  maxAssets:Infinity,maxSlots:Infinity,maxConcurrentPositions:8,maxLeverage:5,maxMarginPct:.20,maxPortfolioRiskPct:.04,maxSameSide:Infinity,
+  maxRoundTripCostBps:24,minNetEvBps:3,seedNetEvBps:8,seedRiskMultiplier:.20,seedMinDirProb:.45,seedMinDirLead:.04,fullMinDirProb:.43,fullMinDirLead:.02,seedProfitObs:0,minSeedDQ:60,minGlobalProfitObs:200,minAssetProfitObs:5,minGlobalModelObs:120,minAssetLiveObs:20,timeStopMultiple:2,
   bootstrapConcurrency:1,bootstrapIntervalMs:60000,bootstrapMinSpacingMs:2500,bootstrapRunning:false,bootstrapIntervalSince:0,
   wsQueue:[],wsWanted:{},wsAcked:{},wsSentAt:{},wsSubDefs:{},wsPumpTimer:0,wsWatchdog:0,wsLastData:0,wsGeneration:0,
   perpDexNames:[''],universeByDex:{},resolveRestNext:0,
@@ -443,7 +443,7 @@ function portfolioOpen(coin,h,f,pl){
   if(P.cooldown[coin]&&t<P.cooldown[coin])return reject('COOLDOWN');
   var sameSide=ks.filter(function(k){return p.positions[k]&&p.positions[k].direction===pl.direction}).length;
   if(sameSide>=P.maxSameSide)return reject('SAME_SIDE');
-  var portfolioBudget=p.capital*P.maxPortfolioRiskPct,remainingRisk=Math.max(0,portfolioBudget-portfolioRiskOpen(p)),riskCash=Math.min(p.capital*(S.risk/100),remainingRisk),riskDist=Math.abs(pl.entry-pl.sl),feePerUnit=executionCostPerUnit(pl.entry,pl.sl,spreadBps(f)),size=riskDist>0&&finite(feePerUnit)&&riskCash>0?riskCash/(riskDist+feePerUnit):NaN;
+  var portfolioBudget=p.capital*P.maxPortfolioRiskPct,remainingRisk=Math.max(0,portfolioBudget-portfolioRiskOpen(p)),baseRiskCash=Math.min(p.capital*(S.risk/100),remainingRisk),riskCash=baseRiskCash*(seedMode?P.seedRiskMultiplier:1),riskDist=Math.abs(pl.entry-pl.sl),feePerUnit=executionCostPerUnit(pl.entry,pl.sl,spreadBps(f)),size=riskDist>0&&finite(feePerUnit)&&riskCash>0?riskCash/(riskDist+feePerUnit):NaN;
   if(!finite(size)||size<=0)return reject('SIZE');
   var minRiskCash=p.capital*0.001;if(riskCash<minRiskCash)return reject('RISK_BUDGET_EXHAUSTED');
   var lev=Math.min(P.maxLeverage,finite(a.maxLeverage)?a.maxLeverage:P.maxLeverage),notional=Math.abs(size*pl.entry),margin=notional/Math.max(1,lev),free=Math.max(0,p.capital-portfolioMarginUsed(p)),marginCap=p.capital*P.maxMarginPct;
@@ -814,6 +814,7 @@ function orderPlan(h,f,m){
   var seedMode=!profitReady&&profitObs>=P.seedProfitObs;
   var blendW=clamp(profitObs/300,0,1),blendedEv=finite(classEv)&&finite(profitEv)?classEv*(1-blendW)+profitEv*blendW:finite(profitEv)?profitEv:classEv;
   var es=m.score,align=finite(es)?(dir==='LONG'?es:-es):NaN,modelSeen=globalModel(h,'base').seen||0;
+  var directionalLead=pd-pN;
   var gateReasons=[];
   if(!finite(entry)||!finite(a)||!finite(sl)||!finite(tp)||!finite(rr))gateReasons.push('LIVE_DATA');
   if(!fresh(S.hl.lastBbo,7000))gateReasons.push('BBO_REQUIRED');
@@ -822,18 +823,21 @@ function orderPlan(h,f,m){
   if(!seedMode&&q<70)gateReasons.push('DQ<70');
   if(modelSeen<P.minGlobalModelObs)gateReasons.push('GLOBAL_MODEL_WARMUP');
   if(!profitReady&&!seedMode)gateReasons.push('PROFIT_CALIBRATION '+profitObs+'/'+P.minGlobalProfitObs);
+  var minProb=seedMode?P.seedMinDirProb:P.fullMinDirProb,minLead=seedMode?P.seedMinDirLead:P.fullMinDirLead;
+  if(pd<minProb)gateReasons.push('DIR_PROB<'+(minProb*100).toFixed(0)+'%');
+  if(directionalLead<minLead)gateReasons.push('DIR_LEAD<'+(minLead*100).toFixed(0)+'pt');
   if(!finite(costBps)||costBps>P.maxRoundTripCostBps)gateReasons.push('cost>'+P.maxRoundTripCostBps+'bps');
   var minEvBps=seedMode?P.seedNetEvBps:P.minNetEvBps;
   if(!finite(blendedEv)||blendedEv*10000<minEvBps)gateReasons.push('NET_EV<'+minEvBps+'bps');
   var gate=gateReasons.length>0;
-  var confidence=seedMode?clamp(profitObs/Math.max(1,P.seedProfitObs),.35,1):clamp(Math.min(profitObs/P.minGlobalProfitObs,localProfitObs/Math.max(1,P.minAssetProfitObs)+.2),0,1);
+  var confidence=seedMode?.5:clamp(Math.min(profitObs/P.minGlobalProfitObs,localProfitObs/Math.max(1,P.minAssetProfitObs)+.2),0,1);
   var tradeScore=finite(blendedEv)?blendedEv*Math.max(.25,confidence)*(q/100): -Infinity;
   return{
-    direction:gate?'NO TRADE':dir,candidate:dir,mode:seedMode?'SEED':'FULL',pd:pd,po:po,edge:pd-po,evidence:es,align:align,q:q,costBps:costBps,
+    direction:gate?'NO TRADE':dir,candidate:dir,mode:seedMode?'SEED':'FULL',pd:pd,po:po,edge:pd-po,directionalLead:directionalLead,evidence:es,align:align,q:q,costBps:costBps,
     profitEv:profitEv,profitEvBps:finite(profitEv)?profitEv*10000:NaN,blendedEv:blendedEv,blendedEvBps:finite(blendedEv)?blendedEv*10000:NaN,
     profitObs:profitObs,localProfitObs:localProfitObs,modelSeen:modelSeen,tradeScore:tradeScore,
     entry:gate?NaN:entry,sl:gate?NaN:sl,tp:gate?NaN:tp,rr:gate?NaN:rr,size:gate?NaN:sz,ev:gate?NaN:blendedEv,evR:gate?NaN:classEv,
-    pair:pair,gateReasons:gateReasons,reason:gate?'Portail fermé : '+gateReasons.join(' · '):(seedMode?'Portail SEED ouvert : modèle global mûr + BBO cohérent + EV nette élevée; la calibration locale/FULL se construit ensuite.':'Portail FULL ouvert : rendement net calibré sur les réalisations de tout l’univers.')
+    pair:pair,gateReasons:gateReasons,reason:gate?'Portail fermé : '+gateReasons.join(' · '):(seedMode?'Portail SEED ouvert : direction réellement dominante + EV nette ≥ '+P.seedNetEvBps+' bps; taille réduite pour amorcer la calibration.':'Portail FULL ouvert : direction dominante + rendement net calibré sur les réalisations de tout l’univers.')
   };
 }
 function hlabel(h){return h===1440?'1j':h===60?'1h':h===240?'4h':h+'m'}
@@ -964,7 +968,7 @@ function recordForecast(h,f,m,pl){
   var spreadKnown=finite(bd.spread)&&marketPriceConsistent(a0,S.hl.book,S.hl.bbo),forecastSpread=spreadKnown?bd.spread*10000:NaN;
   var key=S.coin+'_'+h,arr=DB.pending[key]||[];DB.pending[key]=arr;
   var unresolved=arr.some(function(x){return x&&!x.paperResolved});if(unresolved)return false;
-  var rec={ts:now(),h:h,coin:S.coin,p0:S.hl.price,targetThr:targetThreshold(S.hl.price,f.atr,h),spreadBps:finite(forecastSpread)?forecastSpread:NaN,costKnown:finite(forecastSpread),pBase:m.base.p.slice(),pFull:m.full.p.slice(),vBase:m.base.v.slice(),vFull:m.full.v.slice(),candidate:pl.candidate,entry:finite(pl.entry)?pl.entry:S.hl.price,direction:pl.candidate,dir:pl.candidate,atr:f.atr,pair:pl.pair||null,sl:pl.sl,tp:pl.tp,rr:pl.rr,paper:false,actionable:false,gateReasons:(pl.gateReasons||[]).slice(),createdBy:'V16_UNIVERSE_SHADOW'};
+  var rec={ts:now(),h:h,coin:S.coin,p0:S.hl.price,targetThr:targetThreshold(S.hl.price,f.atr,h),spreadBps:finite(forecastSpread)?forecastSpread:NaN,costKnown:finite(forecastSpread),pBase:m.base.p.slice(),pFull:m.full.p.slice(),vBase:m.base.v.slice(),vFull:m.full.v.slice(),candidate:pl.candidate,entry:finite(pl.entry)?pl.entry:S.hl.price,direction:pl.candidate,dir:pl.candidate,atr:f.atr,pair:pl.pair||null,sl:pl.sl,tp:pl.tp,rr:pl.rr,paper:false,actionable:(pl.direction==='LONG'||pl.direction==='SHORT'),gateReasons:(pl.gateReasons||[]).slice(),createdBy:'V16_UNIVERSE_SHADOW'};
   DB.pending[key].push(rec);var maxPending=Math.max(60,Math.min(400,Math.ceil(h*1.5)));DB.pending[key]=DB.pending[key].slice(-maxPending);save();return true;
 }
 function forecastAllUniverse(){
@@ -1451,7 +1455,7 @@ function dashboard(){
   $('act').textContent=dir==='LONG'?'BUY':dir==='SHORT'?'SELL':'NO TRADE';$('ord').textContent=dir==='NO TRADE'?'WAIT':'READY';
   $('entry').textContent=nfmt(pl.entry);$('sl').textContent=nfmt(pl.sl);$('tp').textContent=nfmt(pl.tp);$('rr').textContent=finite(pl.rr)?'1:'+pl.rr.toFixed(2):'—';$('size').textContent=finite(pl.size)?pl.size.toFixed(5):'—';
   $('whyOrder').textContent=pl.reason;
-  $('gateInfo').textContent='Candidat '+pl.candidate+' · prob '+(pl.pd*100).toFixed(1)+'% · EV class. '+(finite(pl.evR)?(pl.evR*10000).toFixed(2)+' bps':'—')+' · EV nette calibrée '+(finite(pl.blendedEvBps)?pl.blendedEvBps.toFixed(2)+' bps':'—')+' · OOS '+pl.profitObs+' global / '+pl.localProfitObs+' actif · mode '+pl.mode+' · coût '+(finite(pl.costBps)?pl.costBps.toFixed(2):'—')+' bps · TP '+(pl.pair?pl.pair.tp:'—')+' ATR · SL '+(pl.pair?pl.pair.sl:'—')+' ATR';
+  $('gateInfo').textContent='Candidat '+pl.candidate+' · prob '+(pl.pd*100).toFixed(1)+'% · lead vs neutral '+(pl.directionalLead*100).toFixed(1)+' pt · EV class. '+(finite(pl.evR)?(pl.evR*10000).toFixed(2)+' bps':'—')+' · EV nette calibrée '+(finite(pl.blendedEvBps)?pl.blendedEvBps.toFixed(2)+' bps':'—')+' · OOS '+pl.profitObs+' global / '+pl.localProfitObs+' actif · mode '+pl.mode+' · coût '+(finite(pl.costBps)?pl.costBps.toFixed(2):'—')+' bps · TP '+(pl.pair?pl.pair.tp:'—')+' ATR · SL '+(pl.pair?pl.pair.sl:'—')+' ATR';
   $('headline').textContent=dir==='NO TRADE'?'surveillance de '+P.focusCoin+' · '+hlabel(S.h)+' · '+(pl.gateReasons||[]).join(' · '):'opportunité '+dir+' sur '+P.focusCoin+' · '+hlabel(S.h);
   $('invalidate').textContent='Invalidation : données BBO/prix insuffisantes, modèle global non mûr, DQ seed insuffisante, calibration complète insuffisante hors SEED, coût > '+P.maxRoundTripCostBps+' bps ou EV nette sous le seuil actif.';
   renderEvidence(f,m);renderBook(f);
@@ -1467,7 +1471,7 @@ function dashboard(){
   var ages=[S.hl.lastBook,S.hl.lastTrades,S.hl.lastCtx].filter(function(x){return x>0}).map(function(x){return Math.max(0,now()-x)/1000});$('kFresh').textContent=ages.length?Math.round(Math.max.apply(null,ages))+'s':'—';
   $('chartInfo').textContent='HL '+nfmt(S.hl.price)+' · focus dynamique '+P.focusCoin;
   try{renderCapital()}catch(e){}try{renderPortfolio()}catch(e){}try{renderHealth()}catch(e){}try{journal()}catch(e){}
-  $('audit').textContent='V16.1 = comptabilité capital-réel propre. Le capital V15/V16 précédent est archivé et exclu du nouveau rendement; le modèle repart de zéro sur les données de prix puis apprend uniquement sur les observations live OOS valides. Chaque marché est évalué sur les horizons '+TRADE_H.join('/')+' min, puis le meilleur horizon par actif est comparé aux autres actifs. Les shadow forecasts OOS sont créés même lorsque NO TRADE est affiché; à résolution, leur rendement net après frais, slippage et spread alimente la calibration globale et locale. Aucune donnée Binance n’est nécessaire à la décision. Les nouvelles positions sont limitées aux meilleures opportunités et au budget de risque agrégé; un time-stop empêche une position de monopoliser le capital. Rentabilité non présumée : elle doit être démontrée par le rendement net OOS.';
+  $('audit').textContent='V16.1 = comptabilité capital-réel propre. Le capital V15/V16 précédent est archivé et exclu du nouveau rendement; le modèle repart de zéro sur les données de prix puis apprend uniquement sur les observations live OOS valides. Chaque marché est évalué sur les horizons '+TRADE_H.join('/')+' min, puis le meilleur horizon par actif est comparé aux autres actifs. Les shadow forecasts OOS sont créés même lorsque NO TRADE est affiché; à résolution, leur rendement net après frais, slippage et spread alimente la calibration globale et locale. Aucune donnée Binance n’est nécessaire à la décision. Les nouvelles positions sont limitées aux meilleures opportunités; le mode SEED utilise 20% du risque par idée avant de passer en FULL, tandis que le portefeuille peut utiliser jusqu’à 8 positions dans le budget de risque agrégé; un time-stop empêche une position de monopoliser le capital. Rentabilité non présumée : elle doit être démontrée par le rendement net OOS.';
 }
 function migrateV16(){
   if(DB.accountingEpoch===16.1)return;
