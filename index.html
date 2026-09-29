@@ -385,8 +385,8 @@ var S={
 var P={
   assets:[],universe:[],states:{},volume:{},wsSubscribed:{},
   focusCoin:'',focusH:5,
-  maxAssets:Infinity,maxSlots:Infinity,maxConcurrentPositions:8,maxLeverage:5,maxMarginPct:.20,maxPortfolioRiskPct:.04,maxSameSide:Infinity,
-  maxRoundTripCostBps:24,minNetEvBps:3,seedNetEvBps:8,seedRiskMultiplier:.20,seedMinDirProb:.45,seedMinDirLead:.04,fullMinDirProb:.43,fullMinDirLead:.02,seedProfitObs:0,minSeedDQ:60,minGlobalProfitObs:200,minAssetProfitObs:5,minGlobalModelObs:120,minAssetLiveObs:20,timeStopMultiple:2,
+  maxAssets:Infinity,maxSlots:Infinity,maxConcurrentPositions:16,maxLeverage:5,maxMarginPct:.20,maxPortfolioRiskPct:.04,maxSameSide:Infinity,
+  maxRoundTripCostBps:24,minNetEvBps:3,seedNetEvBps:8,seedRiskMultiplier:.20,seedMinDirProb:.6001,seedMinDirLead:.04,fullMinDirProb:.6001,fullMinDirLead:.02,seedProfitObs:0,minSeedDQ:60,minGlobalProfitObs:200,minAssetProfitObs:5,minGlobalModelObs:120,minAssetLiveObs:20,timeStopMultiple:2,
   bootstrapConcurrency:1,bootstrapIntervalMs:60000,bootstrapMinSpacingMs:2500,bootstrapRunning:false,bootstrapIntervalSince:0,
   wsQueue:[],wsWanted:{},wsAcked:{},wsSentAt:{},wsSubDefs:{},wsPumpTimer:0,wsWatchdog:0,wsLastData:0,wsGeneration:0,
   perpDexNames:[''],universeByDex:{},resolveRestNext:0,
@@ -824,7 +824,7 @@ function orderPlan(h,f,m){
   if(modelSeen<P.minGlobalModelObs)gateReasons.push('GLOBAL_MODEL_WARMUP');
   if(!profitReady&&!seedMode)gateReasons.push('PROFIT_CALIBRATION '+profitObs+'/'+P.minGlobalProfitObs);
   var minProb=seedMode?P.seedMinDirProb:P.fullMinDirProb,minLead=seedMode?P.seedMinDirLead:P.fullMinDirLead;
-  if(pd<minProb)gateReasons.push('DIR_PROB<'+(minProb*100).toFixed(0)+'%');
+  if(pd<=minProb)gateReasons.push('DIR_PROB≤'+(minProb*100).toFixed(2)+'%');
   if(directionalLead<minLead)gateReasons.push('DIR_LEAD<'+(minLead*100).toFixed(0)+'pt');
   if(!finite(costBps)||costBps>P.maxRoundTripCostBps)gateReasons.push('cost>'+P.maxRoundTripCostBps+'bps');
   var minEvBps=seedMode?P.seedNetEvBps:P.minNetEvBps;
@@ -837,7 +837,7 @@ function orderPlan(h,f,m){
     profitEv:profitEv,profitEvBps:finite(profitEv)?profitEv*10000:NaN,blendedEv:blendedEv,blendedEvBps:finite(blendedEv)?blendedEv*10000:NaN,
     profitObs:profitObs,localProfitObs:localProfitObs,modelSeen:modelSeen,tradeScore:tradeScore,
     entry:gate?NaN:entry,sl:gate?NaN:sl,tp:gate?NaN:tp,rr:gate?NaN:rr,size:gate?NaN:sz,ev:gate?NaN:blendedEv,evR:gate?NaN:classEv,
-    pair:pair,gateReasons:gateReasons,reason:gate?'Portail fermé : '+gateReasons.join(' · '):(seedMode?'Portail SEED ouvert : direction réellement dominante + EV nette ≥ '+P.seedNetEvBps+' bps; taille réduite pour amorcer la calibration.':'Portail FULL ouvert : direction dominante + rendement net calibré sur les réalisations de tout l’univers.')
+    pair:pair,gateReasons:gateReasons,reason:gate?'Portail fermé : '+gateReasons.join(' · '):(seedMode?'Portail SEED ouvert : probabilité directionnelle > 60% + lead sur NEUTRAL + EV nette ≥ '+P.seedNetEvBps+' bps; taille réduite pour amorcer la calibration.':'Portail FULL ouvert : probabilité directionnelle > 60% + lead sur NEUTRAL + rendement net calibré sur les réalisations de tout l’univers.')
   };
 }
 function hlabel(h){return h===1440?'1j':h===60?'1h':h===240?'4h':h+'m'}
