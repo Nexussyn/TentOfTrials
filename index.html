@@ -1570,7 +1570,7 @@ function migrateV16(){
   DB.legacyV15=DB.legacyV15||{portfolio:oldP,profit:DB.profit||{},obs:DB.obs||{}};
   DB.legacyV16=DB.legacyV16||{portfolio:oldP,profit:DB.profit||{},exec:DB.exec||{},obs:DB.obs||{}};
   DB.legacyV162=DB.legacyV162||{portfolio:oldP,profit:DB.profit||{},exec:DB.exec||{},obs:DB.obs||{}};
-  // V16.4 démarre un nouvel epoch propre : l'ancien portefeuille et l'ancienne calibration de politique sont archivés et exclus.
+  // V16.4 démarre un nouvel epoch propre : les anciens portefeuille et calibrations de politique sont archivés et exclus.
   DB.portfolio={capitalBase:S.capital,capital:S.capital,peak:S.capital,maxDD:0,realizedNet:0,fees:0,wins:0,losses:0,trades:0,positions:{},log:[],epoch:16.4,startedAt:now()};
   DB.profit={global:{},asset:{}};
   DB.exec={global:{},asset:{}};
