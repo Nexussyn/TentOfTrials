@@ -376,7 +376,7 @@ function hydratePersistent(){
 }
 var S={
   coin:'',h:5,capital:1000,risk:.5,fee:4.5,slip:1.5,lastForecast:0,lastRender:0,lastRest:0,
-  hl:{price:NaN,markPx:NaN,oraclePx:NaN,dayNtlVlm:NaN,book:null,oi:NaN,funding:NaN,candles:[],trades:[],oiHist:[],lastPrice:0,lastBook:0,lastTrades:0,lastCtx:0},
+  hl:{price:NaN,markPx:NaN,oraclePx:NaN,dayNtlVlm:NaN,book:null,bbo:null,oi:NaN,funding:NaN,candles:[],trades:[],oiHist:[],lastPrice:0,lastBook:0,lastBbo:0,lastTrades:0,lastCtx:0},
   bn:{price:NaN,oi:NaN,funding:NaN,spot:[],perp:[],liq:[],oiHist:[],lastMark:0,lastSpot:0,lastPerp:0,lastLiq:0,lastRest:0},
   tape:[],feed:{HL_WS:'INIT',HL_L2:'INIT',HL_TRADES:'INIT',HL_CANDLE:'INIT',HL_CTX:'INIT',BN_WS:'INIT',BN_REST:'INIT',BN_SPOT:'INIT'}
 };
@@ -388,7 +388,7 @@ var P={
   maxAssets:Infinity,maxSlots:Infinity,maxConcurrentPositions:4,maxLeverage:5,maxMarginPct:.20,maxPortfolioRiskPct:.02,maxSameSide:Infinity,
   maxRoundTripCostBps:24,minNetEvBps:3,minGlobalProfitObs:200,minAssetProfitObs:5,minGlobalModelObs:120,minAssetLiveObs:20,timeStopMultiple:2,
   bootstrapConcurrency:1,bootstrapIntervalMs:60000,bootstrapMinSpacingMs:2500,bootstrapRunning:false,bootstrapIntervalSince:0,
-  wsQueue:[],wsWanted:{},wsAcked:{},wsSentAt:{},wsSubDefs:{},wsPumpTimer:0,wsWatchdog:0,wsGeneration:0,
+  wsQueue:[],wsWanted:{},wsAcked:{},wsSentAt:{},wsSubDefs:{},wsPumpTimer:0,wsWatchdog:0,wsLastData:0,wsGeneration:0,
   perpDexNames:[''],universeByDex:{},resolveRestNext:0,
   h:5,lastScan:0,lastMeta:0,lastBootstrap:0,bootstrapped:{},positions:{},cooldown:{},signalsRows:[],lastOpenRejects:{},microAssets:{},microLimit:40,lastMicroRefresh:0,wsState:'INIT',wsError:'',wsReconnects:0
 };
@@ -812,6 +812,7 @@ function orderPlan(h,f,m){
   var es=m.score,align=finite(es)?(dir==='LONG'?es:-es):NaN,modelSeen=globalModel(h,'base').seen||0;
   var gateReasons=[];
   if(!finite(entry)||!finite(a)||!finite(f.l2)||!finite(sl)||!finite(tp)||!finite(rr))gateReasons.push('LIVE_DATA');
+  if(!fresh(S.hl.lastBbo,7000)||!fresh(S.hl.lastBook,7000)||!fresh(S.hl.lastTrades,12000))gateReasons.push('MICROSTRUCTURE_REQUIRED');
   if(q<70)gateReasons.push('DQ<70');
   if(modelSeen<P.minGlobalModelObs)gateReasons.push('GLOBAL_MODEL_WARMUP');
   if(profitObs<P.minGlobalProfitObs)gateReasons.push('PROFIT_CALIBRATION '+profitObs+'/'+P.minGlobalProfitObs);
@@ -1034,7 +1035,7 @@ async function resolve(){
         try{
           var path=await fetchPath(p.ts,h,coin),at=path&&pathPriceAt(p.ts,h,path,coin);
           if(!at){if(now()-p.ts>7*86400000)DB.expired=(DB.expired||0)+1;else keep.push(p);continue}
-          var r=at.p/p.p0-1,target=labelFromReturn(r,finite(p.targetThr)?p.targetThr:targetThreshold(p.p0,p.atr,h)),costBps=2*(p.paperFee!=null?p.paperFee:S.fee)+2*(p.paperSlip!=null?p.paperSlip:S.slip)+(finite(p.spreadBps)?p.spreadBps:0),sgn=p.candidate==='LONG'?1:-1,netRet=sgn*(at.p-p.entry)/(p.entry||p.p0)-costBps/10000;
+          var r=at.p/p.p0-1,target=labelFromReturn(r,finite(p.targetThr)?p.targetThr:targetThreshold(p.p0,p.atr,h)),costBps=2*(p.paperFee!=null?p.paperFee:S.fee)+2*(p.paperSlip!=null?p.paperSlip:S.slip)+(p.costKnown&&finite(p.spreadBps)?p.spreadBps:0),costKnown=p.costKnown===true&&finite(p.spreadBps),sgn=p.candidate==='LONG'?1:-1,netRet=sgn*(at.p-p.entry)/(p.entry||p.p0)-costBps/10000;
           var base=model(h,'base',coin),full=model(h,'full',coin),gb=globalModel(h,'base'),gf=globalModel(h,'full'),vb=safeVector(p.vBase,30),vf=safeVector(p.vFull,30),prB=null,prF=null;
           if(vb&&vf){
             var bl=forecastLogits(base,vb),fl=forecastLogits(full,vf),gbl=forecastLogits(gb,vb),gfl=forecastLogits(gf,vf);if(!bl||!fl||!gbl||!gfl)throw new Error('frozen vectors invalid');
@@ -1047,7 +1048,7 @@ async function resolve(){
             prB=probsNormalize(p.pBase);prF=probsNormalize(p.pFull);if(!prB||!prF)throw new Error('legacy pending record has no valid frozen probabilities');DB.legacyResolved=(DB.legacyResolved||0)+1;
           }
           if(!DB.obs[key])DB.obs[key]=[];DB.obs[key].push({ts:p.ts,target:target,pb:prB,pf:prF,netRet:finite(netRet)?netRet:NaN,actionable:p.actionable===true,source:vb&&vf?'LIVE':'LEGACY'});DB.obs[key]=DB.obs[key].slice(-150);
-          learnGrid(h,p,path);updateProfitCalibration(h,coin,p.candidate,target,netRet);
+          learnGrid(h,p,path);if(costKnown)updateProfitCalibration(h,coin,p.candidate,target,netRet);
         }catch(e){diagError('RESOLVE_'+coin+'_'+h+'_'+i,e);if(now()-p.ts>10*60000)DB.resolvedErrors=(DB.resolvedErrors||0)+1;else keep.push(p)}
       }
       DB.pending[key]=keep;
@@ -1169,7 +1170,7 @@ function pumpSubscriptions(ws){
         ws.send(JSON.stringify({method:'subscribe',subscription:sub}));
         P.wsSentAt[k]=now();
       }catch(e){delete P.wsWanted[k];delete P.wsSubDefs[k];}
-      P.wsPumpTimer=setTimeout(step,110);
+      P.wsPumpTimer=setTimeout(step,60);
     }
   };
   step();
@@ -1252,11 +1253,12 @@ function reconnectHL(){
     try{
       var ws=new WebSocket(HLWS);S.hlSocket=ws;
       ws.onopen=function(){
-        attempt=0;P.wsGeneration++;P.wsQueue=[];P.wsWanted={};P.wsAcked={};P.wsSentAt={};P.wsSubDefs={};clearTimeout(P.wsPumpTimer);P.wsPumpTimer=0;clearInterval(P.wsWatchdog);P.wsWatchdog=0;P.wsState='OK';P.wsError='';S.feed.HL_WS='OK';
+        attempt=0;P.wsGeneration++;P.wsQueue=[];P.wsWanted={};P.wsAcked={};P.wsSentAt={};P.wsSubDefs={};P.wsLastData=now();clearTimeout(P.wsPumpTimer);P.wsPumpTimer=0;clearInterval(P.wsWatchdog);P.wsWatchdog=0;P.wsState='OK';P.wsError='';S.feed.HL_WS='OK';
         subscribeNewPortfolioAssets();
         P.wsWatchdog=setInterval(function(){
           if(ws!==S.hlSocket||ws.readyState!==1)return;
           var t0=now();
+          if(P.wsLastData&&t0-P.wsLastData>30000){P.wsError='WebSocket silencieux >30s';try{ws.close()}catch(_){ }return}
           Object.keys(P.wsSentAt).forEach(function(k){
             if(!P.wsAcked[k]&&t0-P.wsSentAt[k]>8000&&P.wsSubDefs[k]){
               delete P.wsWanted[k];delete P.wsSentAt[k];queueSubscription(P.wsSubDefs[k]);
@@ -1267,7 +1269,7 @@ function reconnectHL(){
         clearInterval(timer);timer=setInterval(function(){if(ws.readyState===1)ws.send(JSON.stringify({method:'ping'}))},30000);
       };
       ws.onmessage=function(e){try{
-        var m=JSON.parse(e.data),t=now();
+        var m=JSON.parse(e.data),t=now();P.wsLastData=t;
         if(m.channel==='subscriptionResponse'&&m.data){
           var ack=subKey(m.data.subscription||m.data);
           if(ack){P.wsAcked[ack]=t;delete P.wsWanted[ack];delete P.wsSentAt[ack];}
