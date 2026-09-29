@@ -390,7 +390,7 @@ var P={
   bootstrapConcurrency:1,bootstrapIntervalMs:60000,bootstrapMinSpacingMs:2500,bootstrapRunning:false,bootstrapIntervalSince:0,
   wsQueue:[],wsWanted:{},wsAcked:{},wsSentAt:{},wsSubDefs:{},wsPumpTimer:0,wsWatchdog:0,wsLastData:0,wsGeneration:0,
   perpDexNames:[''],universeByDex:{},resolveRestNext:0,
-  h:5,lastScan:0,lastMeta:0,lastBootstrap:0,bootstrapped:{},positions:{},cooldown:{},signalsRows:[],lastOpenRejects:{},microAssets:{},microLimit:40,lastMicroRefresh:0,wsState:'INIT',wsError:'',wsReconnects:0
+  h:5,lastScan:0,lastMeta:0,lastBootstrap:0,bootstrapped:{},positions:{},cooldown:{},signalsRows:[],lastOpenRejects:{},microAssets:{},microLimit:25,bboAssets:{},bboLimit:100,lastMicroRefresh:0,bboReady:0,priceReady:0,microReady:0,wsState:'INIT',wsError:'',wsReconnects:0
 };
 function newAssetState(){
   return{
@@ -592,7 +592,8 @@ function profitBucket(store,h,dir,target){
   if(!store[key])store[key]={n:0,mean:0,m2:0,lastTs:0};
   return store[key];
 }
-function updateProfitCalibration(h,coin,dir,target,netRet,silent){
+function updateProfitCalibration(h,coin,dir,target,netRet,costKnown,silent){
+  if(typeof costKnown==='boolean'){/* explicit executable-spread status */}else{silent=costKnown;costKnown=false}
   if((dir!=='LONG'&&dir!=='SHORT')||!finite(netRet)||!Number.isInteger(target)||target<0||target>2)return;
   DB.profit=DB.profit||{global:{},asset:{}};DB.profit.global=DB.profit.global||{};DB.profit.asset=DB.profit.asset||{};
   var g=profitBucket(DB.profit.global,h,dir,target),a0=(DB.profit.asset[coin]=DB.profit.asset[coin]||{}),a=profitBucket(a0,h,dir,target);
@@ -1035,7 +1036,7 @@ async function resolve(){
         try{
           var path=await fetchPath(p.ts,h,coin),at=path&&pathPriceAt(p.ts,h,path,coin);
           if(!at){if(now()-p.ts>7*86400000)DB.expired=(DB.expired||0)+1;else keep.push(p);continue}
-          var r=at.p/p.p0-1,target=labelFromReturn(r,finite(p.targetThr)?p.targetThr:targetThreshold(p.p0,p.atr,h)),costBps=2*(p.paperFee!=null?p.paperFee:S.fee)+2*(p.paperSlip!=null?p.paperSlip:S.slip)+(p.costKnown&&finite(p.spreadBps)?p.spreadBps:0),costKnown=p.costKnown===true&&finite(p.spreadBps),sgn=p.candidate==='LONG'?1:-1,netRet=sgn*(at.p-p.entry)/(p.entry||p.p0)-costBps/10000;
+          var r=at.p/p.p0-1,target=labelFromReturn(r,finite(p.targetThr)?p.targetThr:targetThreshold(p.p0,p.atr,h)),spreadPenalty=(p.costKnown&&finite(p.spreadBps))?p.spreadBps:0,costBps=2*(p.paperFee!=null?p.paperFee:S.fee)+2*(p.paperSlip!=null?p.paperSlip:S.slip)+spreadPenalty,costKnown=p.costKnown===true&&finite(p.spreadBps),sgn=p.candidate==='LONG'?1:-1,netRet=sgn*(at.p-p.entry)/(p.entry||p.p0)-costBps/10000;
           var base=model(h,'base',coin),full=model(h,'full',coin),gb=globalModel(h,'base'),gf=globalModel(h,'full'),vb=safeVector(p.vBase,30),vf=safeVector(p.vFull,30),prB=null,prF=null;
           if(vb&&vf){
             var bl=forecastLogits(base,vb),fl=forecastLogits(full,vf),gbl=forecastLogits(gb,vb),gfl=forecastLogits(gf,vf);if(!bl||!fl||!gbl||!gfl)throw new Error('frozen vectors invalid');
@@ -1047,8 +1048,8 @@ async function resolve(){
           }else{
             prB=probsNormalize(p.pBase);prF=probsNormalize(p.pFull);if(!prB||!prF)throw new Error('legacy pending record has no valid frozen probabilities');DB.legacyResolved=(DB.legacyResolved||0)+1;
           }
-          if(!DB.obs[key])DB.obs[key]=[];DB.obs[key].push({ts:p.ts,target:target,pb:prB,pf:prF,netRet:finite(netRet)?netRet:NaN,actionable:p.actionable===true,source:vb&&vf?'LIVE':'LEGACY'});DB.obs[key]=DB.obs[key].slice(-150);
-          learnGrid(h,p,path);if(costKnown)updateProfitCalibration(h,coin,p.candidate,target,netRet);
+          if(!DB.obs[key])DB.obs[key]=[];DB.obs[key].push({ts:p.ts,target:target,pb:prB,pf:prF,netRet:finite(netRet)?netRet:NaN,costKnown:costKnown,actionable:p.actionable===true,source:vb&&vf?'LIVE':'LEGACY'});DB.obs[key]=DB.obs[key].slice(-150);
+          learnGrid(h,p,path);updateProfitCalibration(h,coin,p.candidate,target,netRet,costKnown);
         }catch(e){diagError('RESOLVE_'+coin+'_'+h+'_'+i,e);if(now()-p.ts>10*60000)DB.resolvedErrors=(DB.resolvedErrors||0)+1;else keep.push(p)}
       }
       DB.pending[key]=keep;
@@ -1175,36 +1176,22 @@ function pumpSubscriptions(ws){
   };
   step();
 }
-function microTargetSet(){
+function rankedTargetSet(limit){
   var desired={},rows=P.universe.map(function(coin){return{coin:coin,vol:+(P.volume[coin]||0)}}).sort(function(a,b){return b.vol-a.vol});
-  var lim=Math.min(P.microLimit||40,rows.length);
+  var lim=Math.min(limit||rows.length,rows.length);
   for(var i=0;i<lim;i++)desired[rows[i].coin]=true;
-  Object.keys(DB.portfolio&&DB.portfolio.positions||{}).forEach(function(coin){if(P.universe.indexOf(coin)>=0)desired[coin]=true});
   if(P.focusCoin&&P.universe.indexOf(P.focusCoin)>=0)desired[P.focusCoin]=true;
+  Object.keys(DB.portfolio&&DB.portfolio.positions||{}).forEach(function(coin){if(P.universe.indexOf(coin)>=0)desired[coin]=true});
   return desired;
 }
 function refreshMicroSubscriptions(force){
   var ws=S.hlSocket;if(!ws||ws.readyState!==1)return;
-  var t=now();if(!force&&t-P.lastMicroRefresh<15000)return;
+  var t=now();if(!force&&t-P.lastMicroRefresh<30000)return;
   P.lastMicroRefresh=t;
-  var desired=microTargetSet(),next={};
-  Object.keys(desired).forEach(function(coin){next[coin]=true});
-  var old=P.microAssets||{};
-  Object.keys(old).forEach(function(coin){
-    if(!next[coin]){
-      ['l2Book','trades'].forEach(function(type){
-        var sub={type:type,coin:coin},k=subKey(sub);
-        if(P.wsAcked[k]||P.wsWanted[k]){try{ws.send(JSON.stringify({method:'unsubscribe',subscription:sub}))}catch(e){}}
-        delete P.wsAcked[k];delete P.wsWanted[k];delete P.wsSentAt[k];delete P.wsSubDefs[k];
-      });
-    }
-  });
-  P.wsQueue=(P.wsQueue||[]).filter(function(sub){
-    return !(sub&&(sub.type==='l2Book'||sub.type==='trades')&&!next[sub.coin]);
-  });
-  P.microAssets=next;
-  for(var i=0;i<P.universe.length;i++)queueSubscription({type:'bbo',coin:P.universe[i]});
-  Object.keys(next).forEach(function(coin){
+  var bboDesired=rankedTargetSet(P.bboLimit||100),microDesired=rankedTargetSet(P.microLimit||25);
+  P.bboAssets=bboDesired;P.microAssets=microDesired;
+  Object.keys(bboDesired).forEach(function(coin){queueSubscription({type:'bbo',coin:coin})});
+  Object.keys(microDesired).forEach(function(coin){
     queueSubscription({type:'l2Book',coin:coin});
     queueSubscription({type:'trades',coin:coin});
   });
@@ -1213,7 +1200,6 @@ function refreshMicroSubscriptions(force){
 function subscribeNewPortfolioAssets(){
   var ws=S.hlSocket;if(!ws||ws.readyState!==1)return;
   queueSubscription({type:'allMids'});
-  queueSubscription({type:'allDexsAssetCtxs'});
   refreshMicroSubscriptions(true);
   pumpSubscriptions(ws);
 }
@@ -1430,8 +1416,8 @@ function renderHealth(){
   var f={HL_WS:P.wsState,HL_BBO:fresh(S.hl.lastBbo,10000)?'OK':(S.hlSocket&&S.hlSocket.readyState===1?'WAIT':'STALE'),HL_L2:fresh(S.hl.lastBook,7000)?'OK':(S.hlSocket&&S.hlSocket.readyState===1?'WAIT':'STALE'),HL_TRADES:fresh(S.hl.lastTrades,12000)?'OK':(S.hlSocket&&S.hlSocket.readyState===1?'WAIT':'STALE'),HL_CTX:fresh(S.hl.lastCtx,30000)?'OK':'WAIT'};
   var map=Object.keys(f).map(function(k){var v=f[k],cls=v==='OK'?'ok':v==='WAIT'?'warn':'bad';return'<div class="src"><div class="tiny">'+k+'</div><b class="'+cls+'">'+v+'</b></div>'}).join('');
   var desired=Object.keys(P.wsSubDefs||{}).length,acked=Object.keys(P.wsAcked||{}).length,queue=(P.wsQueue||[]).length;
-  var liveReady=0;for(var i=0;i<P.universe.length;i++){var a=P.states[P.universe[i]];if(a&&fresh(a.hl.lastPrice,10000)&&fresh(a.hl.lastBook,10000)&&fresh(a.hl.lastTrades,15000))liveReady++}
-  $('health').innerHTML=map;$('healthText').textContent=P.universe.length+' marchés · live-ready '+liveReady+' · subscriptions '+acked+'/'+Math.max(desired,acked)+' · micro '+Object.keys(P.microAssets||{}).length+' · reconnexions '+(P.wsReconnects||0)+(P.wsError?' · '+P.wsError:'')+' · file '+queue+' · focus '+(P.focusCoin||'—')+' '+(P.focusH||'—')+' · '+new Date().toLocaleTimeString('fr-FR')+' · Hyperliquid natif';
+  var liveReady=0,priceReady=0,bboReady=0,microReady=0;for(var i=0;i<P.universe.length;i++){var a=P.states[P.universe[i]];if(a&&fresh(a.hl.lastPrice,10000))priceReady++;if(a&&fresh(a.hl.lastBbo,10000))bboReady++;if(a&&fresh(a.hl.lastBook,10000)&&fresh(a.hl.lastTrades,15000))microReady++;if(a&&fresh(a.hl.lastPrice,10000)&&fresh(a.hl.lastBbo,10000))liveReady++}P.priceReady=priceReady;P.bboReady=bboReady;P.microReady=microReady;
+  $('health').innerHTML=map;$('healthText').textContent=P.universe.length+' marchés · prix '+priceReady+' · BBO '+bboReady+' · micro '+microReady+' · subscriptions '+acked+'/'+Math.max(desired,acked)+' · reconnexions '+(P.wsReconnects||0)+(P.wsError?' · '+P.wsError:'')+' · file '+queue+' · focus '+(P.focusCoin||'—')+' '+(P.focusH||'—')+' · '+new Date().toLocaleTimeString('fr-FR')+' · Hyperliquid natif';
 }
 function selectFocus(){
   var rows=(P.signalsRows||[]).filter(function(x){return x&&finite(x.price)&&x.h});
@@ -1536,15 +1522,17 @@ async function boot(){
       portfolioScan();
       dashboard();
     }).catch(function(e){diagError('REST_BOOT',e);dashboard()});
+    var lastScanLoop=0;
     setInterval(function(){
-      if(now()-S.lastRest>30000)restSync().then(function(){portfolioScan();return portfolioBootstrap()}).then(function(){portfolioScan()}).catch(function(e){diagError('REST_LOOP',e)});
+      if(now()-S.lastRest>30000)restSync().then(function(){return portfolioBootstrap()}).catch(function(e){diagError('REST_LOOP',e)});
       updatePortfolioPositions();updatePaperPositions();
       resolve().catch(function(e){diagError('RESOLVE',e)});
+      if(now()-lastScanLoop>=10000){lastScanLoop=now();try{portfolioScan()}catch(e){diagError('SCAN_LOOP',e)}}
       try{dashboard()}catch(e){diagError('RENDER_LOOP',e)}
-    },5000);
+    },2000);
     setInterval(function(){
-      if(P.universe.length&&(!P.lastBootstrap||now()-P.lastBootstrap>=P.bootstrapIntervalMs))portfolioBootstrap().then(function(){portfolioScan()}).catch(function(e){diagError('BOOTSTRAP_LOOP',e)});
-    },5000);
+      if(P.universe.length&&(!P.lastBootstrap||now()-P.lastBootstrap>=P.bootstrapIntervalMs))portfolioBootstrap().then(function(){try{portfolioScan()}catch(e){diagError('BOOTSTRAP_SCAN',e)}}).catch(function(e){diagError('BOOTSTRAP_LOOP',e)});
+    },10000);
     stage(P.universe.length?'LIVE':'CONNECTING');
     setInterval(function(){
       if(now()-S.lastForecast>55000){
