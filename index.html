@@ -800,26 +800,26 @@ function settlePaperPosition(h,position,exit,reason,exitTs){
   return true;
 }
 function updatePaperPositions(){
-  for(var hi=0;hi<H.length;hi++){
-    var h=H[hi],ledger=paperState(h),pos=ledger.position;
-    if(!pos||pos.closed)continue;
-    var dir=pos.direction==='LONG'?1:-1;
-    var ticks=S.tape.filter(function(x){return x.t>=(pos.lastTs||pos.ts)&&finite(x.p)}).sort(function(a,b){return a.t-b.t});
-    var closed=false;
-    for(var i=0;i<ticks.length;i++){
-      var q=ticks[i],hitSL=dir>0?q.p<=pos.sl:q.p>=pos.sl,hitTP=dir>0?q.p>=pos.tp:q.p<=pos.tp;
-      pos.lastTs=q.t;
-      if(hitSL||hitTP){
-        settlePaperPosition(h,pos,hitSL?pos.sl:pos.tp,hitSL?'SL':'TP',q.t);
-        closed=true;break;
+  var list=P.universe.length?P.universe.slice():[S.coin];
+  for(var ci=0;ci<list.length;ci++){
+    var coin=list[ci];
+    withAsset(coin,function(){
+      for(var hi=0;hi<H.length;hi++){
+        var h=H[hi],ledger=paperState(h),pos=ledger.position;
+        if(!pos||pos.closed)continue;
+        var dir=pos.direction==='LONG'?1:-1,ticks=S.tape.filter(function(x){return x.t>=(pos.lastTs||pos.ts)&&finite(x.p)}).sort(function(a,b){return a.t-b.t}),closed=false;
+        for(var i=0;i<ticks.length;i++){
+          var q=ticks[i],hitSL=dir>0?q.p<=pos.sl:q.p>=pos.sl,hitTP=dir>0?q.p>=pos.tp:q.p<=pos.tp;
+          pos.lastTs=q.t;
+          if(hitSL||hitTP){settlePaperPosition(h,pos,hitSL?pos.sl:pos.tp,hitSL?'SL':'TP',q.t);closed=true;break}
+        }
+        if(!closed&&finite(S.hl.price)){
+          var tt=now(),hitSL2=dir>0?S.hl.price<=pos.sl:S.hl.price>=pos.sl,hitTP2=dir>0?S.hl.price>=pos.tp:S.hl.price<=pos.tp;
+          if(hitSL2||hitTP2)settlePaperPosition(h,pos,hitSL2?pos.sl:pos.tp,hitSL2?'SL':'TP',tt);else pos.lastTs=tt;
+        }
+        if(!closed&&ledger.position){ledger.position=pos;DB.paper[coin+'_'+h]=ledger}
       }
-    }
-    if(!closed&&finite(S.hl.price)){
-      var t=now(),hitSL2=dir>0?S.hl.price<=pos.sl:S.hl.price>=pos.sl,hitTP2=dir>0?S.hl.price>=pos.tp:S.hl.price<=pos.tp;
-      if(hitSL2||hitTP2)settlePaperPosition(h,pos,hitSL2?pos.sl:pos.tp,hitSL2?'SL':'TP',t);
-      else pos.lastTs=t;
-    }
-    if(!closed&&ledger.position){ledger.position=pos;DB.paper[S.coin+'_'+h]=ledger}
+    });
   }
 }
 function targetThreshold(price,atr1m,h){
