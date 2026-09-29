@@ -461,7 +461,12 @@ function updatePortfolioPositions(){
     var coin=ks[i],pos=p.positions[coin],a=ensureAsset(coin);if(!pos)continue;
     var dir=pos.direction==='LONG'?1:-1,ticks=a.tape.filter(function(x){return x.t>pos.lastTs&&finite(x.p)}).sort(function(x,y){return x.t-y.t}),done=false;
     for(var j=0;j<ticks.length;j++){var q=ticks[j],hitSL=dir>0?q.p<=pos.sl:q.p>=pos.sl,hitTP=dir>0?q.p>=pos.tp:q.p<=pos.tp;pos.lastTs=q.t;if(hitSL||hitTP){portfolioSettle(coin,hitSL?pos.sl:pos.tp,hitSL?'SL':'TP',q.t);done=true;break}}
-    if(!done&&finite(a.hl.price)){var t=now(),sl2=dir>0?a.hl.price<=pos.sl:a.hl.price>=pos.sl,tp2=dir>0?a.hl.price>=pos.tp:a.hl.price<=pos.tp;if(sl2||tp2)portfolioSettle(coin,sl2?pos.sl:pos.tp,sl2?'SL':'TP',t);else pos.lastTs=t}
+    if(!done&&finite(a.hl.price)){
+      var t=now(),sl2=dir>0?a.hl.price<=pos.sl:a.hl.price>=pos.sl,tp2=dir>0?a.hl.price>=pos.tp:a.hl.price<=pos.tp;
+      if(sl2||tp2)portfolioSettle(coin,sl2?pos.sl:pos.tp,sl2?'SL':'TP',t);
+      else if(pos.h&&t-pos.ts>=pos.h*60000*P.timeStopMultiple)portfolioSettle(coin,a.hl.price,'TIME_STOP',t);
+      else pos.lastTs=t;
+    }
   }
 }
 function portfolioRealizedByCoin(p,coin){
