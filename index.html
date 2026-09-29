@@ -620,18 +620,30 @@ function doi5(){
   var z=S.hl.oiHist,cut=now()-5*60000;if(!z.length||!finite(S.hl.oi))return NaN;
   var old=z.filter(function(q){return q.t<=cut}).slice(-1)[0];return old?S.hl.oi/old.v-1:NaN;
 }
+function tapeReturn(ms){
+  var a=S.tape||[];if(a.length<2)return NaN;var cut=now()-ms,first=null,last=null;
+  for(var i=a.length-1;i>=0;i--){var q=a[i];if(!finite(q.p)||q.t<cut)continue;last=last||q;first=q}
+  if(!first||!last||first.p<=0)return NaN;return last.p/first.p-1;
+}
+function tapeATR(ms){
+  var a=S.tape||[];if(a.length<8)return NaN;var cut=now()-ms,z=[];
+  for(var i=a.length-1;i>=0;i--)if(a[i].t>=cut&&finite(a[i].p))z.push(a[i].p);if(z.length<8)return NaN;
+  z.reverse();var s=0,n=0;for(var j=1;j<z.length;j++){s+=Math.abs(z[j]/z[j-1]-1);n++}
+  return finite(S.hl.price)&&n?S.hl.price*s/n:NaN;
+}
 function feats(){
   var c=S.hl.candles,clo=c.map(function(q){return q.c}),d=depth(S.hl.book),p=pasr(),pr=fresh(S.hl.lastTrades,10000),l2=fresh(S.hl.lastBook,5000);
-  var r1=ret(clo,1),r5=ret(clo,5),r15=ret(clo,15),r60=ret(clo,60),em=ema(clo.slice(-180),9)/ema(clo.slice(-180),21)-1;
+  var r1=ret(clo,1),r5=ret(clo,5),r15=ret(clo,15),r60=ret(clo,60);
+  if(!finite(r1))r1=tapeReturn(60000);if(!finite(r5))r5=tapeReturn(300000);if(!finite(r15))r15=tapeReturn(900000);if(!finite(r60))r60=tapeReturn(3600000);
+  var em=ema(clo.slice(-180),9)/ema(clo.slice(-180),21)-1;if(!finite(em)&&finite(r15))em=r15;
   var fr=pr?flowRatio(S.hl.trades):NaN;
   var abs=(finite(fr)&&finite(r5))?clamp(-fr*r5*100,-2,2):NaN;
   var funding=fresh(S.hl.lastCtx,30000)&&finite(S.hl.funding)?-S.hl.funding*3500:NaN;
-  var basis=(fresh(S.hl.lastPrice,5000)&&fresh(S.bn.lastMark,5000)&&finite(S.hl.price)&&finite(S.bn.price))?(S.hl.price/S.bn.price-1)*450:NaN;
-  var sf=fresh(S.bn.lastSpot,15000)?flowRatio(S.bn.spot):NaN;
-  var pf=fresh(S.bn.lastPerp,10000)?flowRatio(S.bn.perp):NaN;
-  var lp=fresh(S.bn.lastLiq,15000)?liqRatio(S.bn.liq):NaN;
+  var basis=fresh(S.hl.lastCtx,30000)&&finite(S.hl.markPx)&&finite(S.hl.oraclePx)&&S.hl.oraclePx!==0?(S.hl.markPx/S.hl.oraclePx-1)*450:NaN;
+  var doi=doi5();
   var micro=l2&&finite(d.microBias)?clamp(d.microBias*900,-3,3):NaN;
-  return{r1:r1,r5:r5,r15:r15,r60:r60,ema:em,l2:l2&&finite(d.imb)?d.imb:NaN,micro:micro,flow:fr,absorption:abs,funding:funding,basis:basis,spotPerp:(finite(sf)&&finite(pf)?sf-pf:NaN),doi:doi5(),liq:lp,pasr:p.v,pasrN:p.n,atr:atr(c.slice(-120)),depth:d};
+  var av=atr(c.slice(-120));if(!finite(av))av=tapeATR(90000);if(!finite(av)&&finite(S.hl.price))av=S.hl.price*.0015;
+  return{r1:r1,r5:r5,r15:r15,r60:r60,ema:em,l2:l2&&finite(d.imb)?d.imb:NaN,micro:micro,flow:fr,absorption:abs,funding:funding,basis:basis,spotPerp:NaN,doi:doi,liq:NaN,pasr:p.v,pasrN:p.n,atr:av,depth:d};
 }
 function scaleFeature(k,v){
   if(!finite(v))return NaN;
@@ -688,13 +700,11 @@ function mixed(h,f){
 }
 function dataQuality(f){
   var checks=[
-    fresh(S.hl.lastPrice,5000),fresh(S.hl.lastBook,5000),fresh(S.hl.lastTrades,10000),
-    fresh(S.hl.lastCtx,30000),fresh(S.bn.lastMark,5000),fresh(S.bn.lastSpot,15000),fresh(S.bn.lastPerp,10000),
-    finite(f.r5),finite(f.r15),finite(f.r60),finite(f.l2),finite(f.flow),finite(f.basis)
+    fresh(S.hl.lastPrice,7000),fresh(S.hl.lastBook,7000),fresh(S.hl.lastTrades,12000),fresh(S.hl.lastCtx,30000),
+    finite(f.r1)||finite(f.r5),finite(f.l2),finite(f.flow),finite(f.atr)
   ];
   var good=checks.filter(Boolean).length;
-  var q=Math.round(clamp(42+good*4.6+(fresh(S.hl.lastBook,5000)?5:0)+(fresh(S.bn.lastMark,5000)?5:0),0,100));
-  return q;
+  return Math.round(clamp(45+good*7+(fresh(S.hl.lastBook,7000)?5:0)+(fresh(S.hl.lastTrades,12000)?5:0),0,100));
 }
 function grid(h,dir){
   var key=S.coin+'_'+h+'_'+dir;
@@ -996,13 +1006,13 @@ function updatePortfolioUniverse(ctx){
   var u=ctx[0].universe,ac=Array.isArray(ctx[1])?ctx[1]:[],rank=[];
   for(var i=0;i<u.length;i++){
     var meta=u[i]||{},name=meta.name,x=ac[i]||{},vol=+x.dayNtlVlm,lev=+meta.maxLeverage;
-    if(name&&meta.isDelisted!==true&&(!finite(lev)||lev>0))rank.push({coin:name,vol:finite(vol)?vol:0,oi:+x.openInterest,funding:+x.funding});
+    if(name&&meta.isDelisted!==true&&(!finite(lev)||lev>0))rank.push({coin:name,vol:finite(vol)?vol:0,oi:+x.openInterest,funding:+x.funding,markPx:+x.markPx,oraclePx:+x.oraclePx});
   }
   rank.sort(function(a,b){return b.vol-a.vol});
   var next=[],seen={};
   for(var j=0;j<rank.length;j++){var coin=rank[j].coin;if(!coin||seen[coin])continue;seen[coin]=true;next.push(coin);ensureAsset(coin)}
   P.universe=next;P.assets=next.slice();P.volume={};
-  for(var k=0;k<rank.length;k++){P.volume[rank[k].coin]=rank[k].vol;var a=ensureAsset(rank[k].coin),metaK=u.find(function(z){return z&&z.name===rank[k].coin})||{};a.maxLeverage=finite(+metaK.maxLeverage)?+metaK.maxLeverage:NaN;a.szDecimals=finite(+metaK.szDecimals)?+metaK.szDecimals:NaN;if(finite(rank[k].oi))a.hl.oi=rank[k].oi;if(finite(rank[k].funding))a.hl.funding=rank[k].funding;if(!a.hl.lastCtx)a.hl.lastCtx=now()}
+  for(var k=0;k<rank.length;k++){P.volume[rank[k].coin]=rank[k].vol;var a=ensureAsset(rank[k].coin),metaK=u.find(function(z){return z&&z.name===rank[k].coin})||{};a.maxLeverage=finite(+metaK.maxLeverage)?+metaK.maxLeverage:NaN;a.szDecimals=finite(+metaK.szDecimals)?+metaK.szDecimals:NaN;if(finite(rank[k].oi))a.hl.oi=rank[k].oi;if(finite(rank[k].funding))a.hl.funding=rank[k].funding;if(finite(rank[k].markPx))a.hl.markPx=rank[k].markPx;if(finite(rank[k].oraclePx))a.hl.oraclePx=rank[k].oraclePx;if(!a.hl.lastCtx)a.hl.lastCtx=now()}
   P.maxSlots=Math.max(1,P.universe.length);P.maxAssets=P.universe.length;P.lastMeta=now();
   if(S.hlSocket&&S.hlSocket.readyState===1)subscribeNewPortfolioAssets();
 }
