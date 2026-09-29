@@ -437,7 +437,6 @@ function portfolioOpen(coin,h,f,pl){
   if(ks.length>=P.maxConcurrentPositions)return reject('POSITION_CAP');
   if(p.positions[coin])return reject('ALREADY_OPEN');
   var localSeen=withAsset(coin,function(){return model(h,'base').seen||0});
-  var seedMode=pl&&pl.mode==='SEED';
   if(!seedMode&&localSeen<120)return reject('MODEL_WARMUP '+localSeen+'/120');
   if(pl.direction!=='LONG'&&pl.direction!=='SHORT')return reject('NO_TRADE');
   if(!finite(pl.entry)||!finite(pl.sl)||!finite(pl.tp)||!finite(f.atr)||f.atr<=0)return reject('INVALID_PLAN');
