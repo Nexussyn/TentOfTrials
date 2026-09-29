@@ -375,8 +375,8 @@ function hydratePersistent(){
   });
 }
 var S={
-  coin:'BTC',h:5,capital:1000,risk:.5,fee:4.5,slip:1.5,lastForecast:0,lastRender:0,lastRest:0,
-  hl:{price:NaN,book:null,oi:NaN,funding:NaN,candles:[],trades:[],oiHist:[],lastPrice:0,lastBook:0,lastTrades:0,lastCtx:0},
+  coin:'',h:5,capital:1000,risk:.5,fee:4.5,slip:1.5,lastForecast:0,lastRender:0,lastRest:0,
+  hl:{price:NaN,markPx:NaN,oraclePx:NaN,dayNtlVlm:NaN,book:null,oi:NaN,funding:NaN,candles:[],trades:[],oiHist:[],lastPrice:0,lastBook:0,lastTrades:0,lastCtx:0},
   bn:{price:NaN,oi:NaN,funding:NaN,spot:[],perp:[],liq:[],oiHist:[],lastMark:0,lastSpot:0,lastPerp:0,lastLiq:0,lastRest:0},
   tape:[],feed:{HL_WS:'INIT',HL_L2:'INIT',HL_TRADES:'INIT',HL_CANDLE:'INIT',HL_CTX:'INIT',BN_WS:'INIT',BN_REST:'INIT',BN_SPOT:'INIT'}
 };
@@ -508,7 +508,8 @@ function bestPlanForAsset(coin){
     var a=ensureAsset(coin),f=feats(),plans=[];
     for(var hi=0;hi<TRADE_H.length;hi++){var h=TRADE_H[hi],m=mixed(h,f),pl=orderPlan(h,f,m);pl.h=h;pl.m=m;plans.push(pl)}
     plans.sort(function(x,y){return(y.tradeScore||-Infinity)-(x.tradeScore||-Infinity)});
-    return{f:f,pl:plans[0],plans:plans};
+    var eligible=plans.filter(function(x){return x.direction==='LONG'||x.direction==='SHORT'});
+    return{f:f,pl:eligible.length?eligible[0]:plans[0],plans:plans};
   });
 }
 function portfolioScan(){
@@ -768,16 +769,15 @@ function orderPlan(h,f,m){
   var costPerUnit=(finite(entry)&&finite(sl)?executionCostPerUnit(entry,sl,spreadBps(f)):NaN),sz=riskDist>0&&finite(costPerUnit)?riskCash/(riskDist+costPerUnit):NaN;
   var classEv=entry&&a&&finite(costBps)?(pd*(a*pair.tp/entry)-po*(a*pair.sl/entry)-costBps/10000):NaN;
   var pe=profitExpectation(h,S.coin,dir,m.p),profitEv=finite(pe.ret)?pe.ret:NaN,profitObs=pe.globalN||0,localProfitObs=pe.localN||0;
-  var blendW=clamp(profitObs/500,0,.80),blendedEv=finite(classEv)&&finite(profitEv)?classEv*(1-blendW)+profitEv*blendW:finite(profitEv)?profitEv:classEv;
+  var blendW=clamp(profitObs/300,0,1),blendedEv=finite(classEv)&&finite(profitEv)?classEv*(1-blendW)+profitEv*blendW:finite(profitEv)?profitEv:classEv;
   var es=m.score,align=finite(es)?(dir==='LONG'?es:-es):NaN,modelSeen=globalModel(h,'base').seen||0;
   var gateReasons=[];
   if(!finite(entry)||!finite(a)||!finite(f.l2)||!finite(sl)||!finite(tp)||!finite(rr))gateReasons.push('LIVE_DATA');
   if(q<70)gateReasons.push('DQ<70');
   if(modelSeen<P.minGlobalModelObs)gateReasons.push('GLOBAL_MODEL_WARMUP');
   if(profitObs<P.minGlobalProfitObs)gateReasons.push('PROFIT_CALIBRATION '+profitObs+'/'+P.minGlobalProfitObs);
-  if(pd<.45)gateReasons.push('prob<45%');
   if(!finite(costBps)||costBps>P.maxRoundTripCostBps)gateReasons.push('cost>'+P.maxRoundTripCostBps+'bps');
-  if(!finite(blendedEv)||blendedEv*10000<3)gateReasons.push('NET_EV<3bps');
+  if(!finite(blendedEv)||blendedEv*10000<P.minNetEvBps)gateReasons.push('NET_EV<'+P.minNetEvBps+'bps');
   var gate=gateReasons.length>0,confidence=clamp(Math.min(profitObs/P.minGlobalProfitObs,localProfitObs/Math.max(1,P.minAssetProfitObs)+.2),0,1);
   var tradeScore=finite(blendedEv)?blendedEv*Math.max(.25,confidence)*(q/100): -Infinity;
   return{
