@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Crypto Direction Engine — V16.4.5 CRYPTO-ONLY UNIVERSE</title>
+<title>Crypto Direction Engine — V16.5.0 CRYPTO-ONLY UNIVERSE</title>
 <style>
 :root{--bg:#061016;--p:#0c1a22;--p2:#09161d;--l:#243843;--t:#edf4f7;--m:#8ea3ad;--u:#43d19d;--d:#ff7082;--n:#f0bf55;--c:#67d7ef}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 15% 0,#122a32,#061016 42%,#050b0f);color:var(--t);font:14px/1.4 system-ui,-apple-system,Segoe UI,sans-serif}
@@ -32,7 +32,7 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
 <body>
 <header class="top">
   <div>
-    <div class="brand">CRYPTO DIRECTION ENGINE · V16.4.5 CRYPTO-ONLY UNIVERSE</div>
+    <div class="brand">CRYPTO DIRECTION ENGINE · V16.5.0 CRYPTO-ONLY UNIVERSE</div>
     <div class="tag">Hyperliquid natif · univers crypto perpétuel primaire uniquement · HIP-3/XYZ exclus · sélection cross-sectionnelle · apprentissage OOS global · aucune exécution réelle</div>
   </div>
   <div class="ctrl">
@@ -385,13 +385,13 @@ var S={
 var P={
   assets:[],universe:[],states:{},volume:{},wsSubscribed:{},
   focusCoin:'',focusH:5,
-  maxAssets:Infinity,maxSlots:Infinity,maxConcurrentPositions:16,maxLeverage:5,maxMarginPct:.20,maxPortfolioRiskPct:.04,maxSameSide:4,
-  maxRoundTripCostBps:24,minNetEvBps:2,seedNetEvBps:8,seedRiskMultiplier:.20,seedMinDirProb:.6001,seedMinDirLead:.04,minExecObs:30,minExecSideObs:20,minExecNetEvBps:2,minExecLowerBps:.5,execShrinkObs:40,minSlAtr:1,maxTpAtr:4,
+  maxAssets:Infinity,maxSlots:Infinity,maxConcurrentPositions:10,maxLeverage:3,maxMarginPct:.95,maxPortfolioRiskPct:.08,maxSameSide:5,
+  maxRoundTripCostBps:24,minNetEvBps:2,seedNetEvBps:8,seedRiskMultiplier:1,timeStopMultiple:168,seedMinDirProb:.6001,seedMinDirLead:.04,minExecObs:30,minExecSideObs:20,minExecNetEvBps:2,minExecLowerBps:.5,execShrinkObs:40,minSlAtr:1,maxTpAtr:4,
   bootstrapBatchSize:10,bootstrapCursor:0,
   bootstrapConcurrency:4,bootstrapIntervalMs:20000,bootstrapMinSpacingMs:1000,bootstrapRunning:false,bootstrapIntervalSince:0,
   wsQueue:[],wsWanted:{},wsAcked:{},wsSentAt:{},wsSubDefs:{},wsPumpTimer:0,wsWatchdog:0,wsLastData:0,wsGeneration:0,
   perpDexNames:[''],allowedPerpDex:'',excludedPerpDexNames:['xyz'],universeByDex:{},resolveRestNext:0,
-  h:5,lastScan:0,lastMeta:0,lastBootstrap:0,bootstrapped:{},positions:{},cooldown:{},signalsRows:[],lastOpenRejects:{},microAssets:{},microLimit:1000,bboAssets:{},bboLimit:1000,lastMicroRefresh:0,bboReady:0,priceReady:0,microReady:0,wsSubBatchSize:12,wsSubSpacingMs:100,wsState:'INIT',wsError:'',wsReconnects:0
+  h:5,lastScan:0,lastMeta:0,lastBootstrap:0,bootstrapped:{},positions:{},cooldown:{},signalsRows:[],lastOpenRejects:{},microAssets:{},microLimit:1000,bboAssets:{},bboLimit:1000,lastMicroRefresh:0,bboReady:0,priceReady:0,microReady:0,strategyUniverseLimit:80,strategyRebalanceMs:3600000,strategyLastRefresh:0,strategyLastRest:0,strategyRunning:false,wsSubBatchSize:12,wsSubSpacingMs:100,wsState:'INIT',wsError:'',wsReconnects:0
 };
 function isCryptoUniverseCoin(coin){
   var s=String(coin||'').trim();
@@ -409,6 +409,7 @@ function newAssetState(){
     maxLeverage:NaN,szDecimals:NaN,dex:'',onlyIsolated:false,marginMode:'cross',
     hl:{price:NaN,markPx:NaN,oraclePx:NaN,book:null,bbo:null,oi:NaN,funding:NaN,dayNtlVlm:NaN,candles:[],trades:[],oiHist:[],lastPrice:0,lastBook:0,lastBbo:0,lastTrades:0,lastCtx:0},
     bn:{price:NaN,oi:NaN,funding:NaN,spot:[],perp:[],liq:[],oiHist:[],lastMark:0,lastSpot:0,lastPerp:0,lastLiq:0,lastRest:0},
+    strategy:{d1:[],lastD1:0,formationDays:14,holdDays:7,rank:NaN,side:'FLAT',vol:NaN,weight:0,signalTs:0},
     tape:[],feed:{HL_WS:'INIT',HL_L2:'INIT',HL_TRADES:'INIT',HL_CANDLE:'INIT',HL_CTX:'INIT',BN_WS:'INIT',BN_REST:'INIT',BN_SPOT:'INIT'}
   };
 }
@@ -539,6 +540,61 @@ function bootstrapPortfolioModel(coin){
     }
     DB.pretrain[coin].updatedAt=now();save();
     return trained;
+  });
+}
+function academicMomentumUniverse(){
+  var rows=[],limit=Math.min(P.strategyUniverseLimit||80,P.universe.length),coins=P.universe.slice().sort(function(a,b){return(P.volume[b]||0)-(P.volume[a]||0)}).slice(0,limit);
+  for(var i=0;i<coins.length;i++){var coin=coins[i],a=ensureAsset(coin),b=a.strategy&&a.strategy.d1||[];if(b.length<15||!finite(a.hl.price)||a.hl.price<=0)continue;
+    var closes=b.slice(-16).map(function(x){return +x.c}).filter(function(x){return finite(x)&&x>0});if(closes.length<15)continue;
+    var ret14=a.hl.price/closes[0]-1,rs=[];for(var j=1;j<closes.length;j++)rs.push(closes[j]/closes[j-1]-1);
+    var mu=rs.reduce(function(z,x){return z+x},0)/Math.max(1,rs.length),vv=rs.length>1?Math.sqrt(rs.reduce(function(z,x){return z+(x-mu)*(x-mu)},0)/(rs.length-1)):NaN;
+    if(!finite(ret14)||!finite(vv)||vv<=0)continue;rows.push({coin:coin,ret14:ret14,vol:vv,volume:+(P.volume[coin]||0)});
+  }
+  rows.sort(function(a,b){return b.ret14-a.ret14});P.academicRows=rows;if(!rows.length)return rows;
+  var n=rows.length,q=Math.max(1,Math.ceil(n*.20)),mid=rows[Math.floor(n/2)].ret14;
+  for(var k=0;k<n;k++){rows[k].rank=k+1;rows[k].side=k<q?'LONG':k>=n-q?'SHORT':'FLAT';rows[k].score=(rows[k].ret14-mid)/(rows[k].vol||1)}
+  ['LONG','SHORT'].forEach(function(side){
+    var z=rows.filter(function(x){return x.side===side}),inv=z.map(function(x){return 1/Math.max(x.vol,1e-6)}),sum=inv.reduce(function(a,b){return a+b},0)||1;
+    for(var ii=0;ii<z.length;ii++){var aa=ensureAsset(z[ii].coin);aa.strategy.rank=z[ii].rank;aa.strategy.side=side;aa.strategy.vol=z[ii].vol;aa.strategy.weight=(inv[ii]/sum)*.5;aa.strategy.signalTs=Math.floor(now()/P.strategyRebalanceMs)*P.strategyRebalanceMs}
+  });
+  for(var m=0;m<n;m++){var af=ensureAsset(rows[m].coin);if(rows[m].side==='FLAT'){af.strategy.rank=rows[m].rank;af.strategy.side='FLAT';af.strategy.vol=rows[m].vol;af.strategy.weight=0}}
+  return rows;
+}
+async function refreshAcademicStrategy(force){
+  if(P.strategyRunning)return;if(!force&&P.strategyLastRefresh&&now()-P.strategyLastRefresh<P.strategyRebalanceMs)return;
+  P.strategyRunning=true;P.strategyLastRefresh=now();
+  var coins=P.universe.slice().sort(function(a,b){return(P.volume[b]||0)-(P.volume[a]||0)}).slice(0,P.strategyUniverseLimit||80),batch=10;
+  try{
+    for(var st=0;st<coins.length;st+=batch){
+      var group=coins.slice(st,st+batch);
+      await Promise.all(group.map(async function(coin){
+        var a=ensureAsset(coin);
+        try{
+          var end=now(),res=await hl({type:'candleSnapshot',req:{coin:coin,interval:'1d',startTime:end-30*86400000,endTime:end-60000}});
+          var bars=(res||[]).map(function(q){return{t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v}}).filter(function(q){return finite(q.c)&&q.c>0}).sort(function(x,y){return x.t-y.t});
+          if(bars.length>=15){a.strategy.d1=bars.slice(-30);a.strategy.lastD1=now();}
+        }catch(e){}
+      }));
+      if(st+batch<coins.length)await sleepMs(200);
+    }
+    academicMomentumUniverse();P.strategyLastRest=now();save();
+  }finally{P.strategyRunning=false}
+}
+function academicMomentumPlan(coin){
+  return withAsset(coin,function(){
+    var a=ensureAsset(coin),s=a.strategy||{},side=s.side||'FLAT',d=depth(a.hl.book);if(!finite(d.bid)&&a.hl.bbo)d=bboDepth(a.hl.bbo);
+    var f0=feats(),m=mixed(5,f0),pd=side==='LONG'?m.p[2]:side==='SHORT'?m.p[0]:NaN,po=side==='LONG'?m.p[0]:side==='SHORT'?m.p[2]:NaN;
+    var costBps=finite(d.spread)?2*S.fee+2*S.slip+d.spread*10000:NaN,entry=side==='LONG'?d.ask:side==='SHORT'?d.bid:NaN,b=s.d1||[];
+    var common={f:f0,h:60,candidate:side,mode:'SEED',strategy:'RM_MOMENTUM_14D_7D',pd:pd,po:po,edge:finite(pd)&&finite(po)?pd-po:NaN,directionalLead:finite(pd)&&finite(po)?pd-po:NaN,evidence:m.score,align:1,q:dataQuality(f0),costBps:costBps,profitEv:NaN,profitEvBps:NaN,blendedEv:NaN,blendedEvBps:NaN,profitObs:0,localProfitObs:0,execLowerBps:NaN,modelSeen:m.globalSeen||0,shadowEligible:false,entry:NaN,sl:NaN,tp:NaN,rr:NaN,size:NaN,pair:null,portfolioWeight:s.weight||0,riskPct:.75};
+    if((side!=='LONG'&&side!=='SHORT')||!finite(entry)||!finite(a.hl.price)||b.length<15||!finite(s.vol)||s.vol<=0){common.direction='NO TRADE';common.tradeScore=-Infinity;common.gateReasons=['ACADEMIC_DATA'];common.reason='Attente du signal RM-momentum 14j/7j.';return common}
+    var vol7=s.vol*Math.sqrt(7),stopPct=clamp(Math.max(vol7*1.75,.025),.025,.12),tpPct=stopPct*2,dir=side==='LONG'?1:-1,sl=entry*(1-dir*stopPct),tp=entry*(1+dir*tpPct),n=Math.max(1,(P.academicRows||[]).length),qnt=Math.max(1,Math.ceil(n*.20)),rank=s.rank||Math.ceil(n/2),strength=side==='LONG'?(qnt-rank+1)/qnt:(rank-(n-qnt))/qnt,score=strength*Math.max(.1,1/(1+s.vol*10)),g=[];
+    if(!finite(costBps)||costBps>P.maxRoundTripCostBps)g.push('cost>'+P.maxRoundTripCostBps+'bps');
+    if(!fresh(a.hl.lastPrice,10000)||!(fresh(a.hl.lastBbo,7000)||fresh(a.hl.lastBook,7000)))g.push('TOP_OF_BOOK_REQUIRED');
+    if(!fresh(a.hl.lastBook,7000))g.push('L2_REQUIRED');
+    if(!(finite(score)&&score>0))g.push('RANK');
+    var gate=g.length>0;
+    Object.assign(common,{direction:gate?'NO TRADE':side,blendedEvBps:score*10000,tradeScore:gate?-Infinity:score,shadowEligible:!gate,entry:gate?NaN:entry,sl:gate?NaN:sl,tp:gate?NaN:tp,rr:2,pair:{sl:stopPct/(s.vol||.01),tp:tpPct/(s.vol||.01)},gateReasons:g,reason:gate?'Portail stratégie fermé : '+g.join(' · '):'RM-momentum crypto 14j formation / 7j détention · quintile winner/loser · inverse-volatilité.'});
+    return common;
   });
 }
 function bestPlanForAsset(coin){
@@ -1305,7 +1361,7 @@ function refreshMicroSubscriptions(force){
   Object.keys(microDesired).forEach(function(coin){
     queueSubscription({type:'l2Book',coin:coin});
     queueSubscription({type:'trades',coin:coin});
-    queueSubscription({type:'activeAssetCtx',coin:coin});
+    queueSubscription({type:'activeAssetCtx',coin:coin});queueSubscription({type:'candle',coin:coin,interval:'1d'});
   });
   pumpSubscriptions(ws);
 }
@@ -1388,7 +1444,7 @@ function reconnectHL(){
           var ar=Array.isArray(m.data)?m.data:(Array.isArray(m.data.trades)?m.data.trades:[]),coin=ar[0]&&ar[0].coin?ar[0].coin:S.coin;
           if(isCryptoUniverseCoin(coin)&&ar.length){var a=ensureAsset(coin);for(var i=0;i<ar.length;i++){var q=ar[i];if(q&&q.side&&q.sz!=null)a.hl.trades.push({time:+q.time||t,side:q.side==='B'?'B':'S',sz:+q.sz})}a.hl.trades=a.hl.trades.slice(-12000);a.hl.lastTrades=t;a.feed.HL_TRADES='OK';if(coin===S.coin)S.hl=a.hl}
         }else if(m.channel==='candle'&&m.data){
-          var q=m.data.data||m.data,coin=q.s||q.coin;if(!isCryptoUniverseCoin(coin||S.coin))return;var a=ensureAsset(coin||S.coin);if(q&&q.t!=null){a.hl.candles.push({t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v});a.hl.candles=a.hl.candles.slice(-5000);a.feed.HL_CANDLE='OK';if((coin||S.coin)===S.coin)S.hl=a.hl}
+          var q=m.data.data||m.data,coin=q.s||q.coin,interval=q.i||q.interval||'';if(!isCryptoUniverseCoin(coin||S.coin))return;var a=ensureAsset(coin||S.coin);if(q&&q.t!=null){if(String(interval)==='1d'){a.strategy=a.strategy||{d1:[],lastD1:0,formationDays:14,holdDays:7,rank:NaN,side:'FLAT',vol:NaN,weight:0,signalTs:0};a.strategy.d1.push({t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v});a.strategy.d1=a.strategy.d1.slice(-30);a.strategy.lastD1=now();}else{a.hl.candles.push({t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v});a.hl.candles=a.hl.candles.slice(-5000)}a.feed.HL_CANDLE='OK';if((coin||S.coin)===S.coin)S.hl=a.hl}
         }else if(m.channel==='activeAssetCtx'&&m.data){
           var d2=m.data.data||m.data,coin2=d2.coin||S.coin;if(!isCryptoUniverseCoin(coin2))return;var q2=m.data.ctx||d2.ctx||d2,a2=ensureAsset(coin2);if(q2){
             if(q2.openInterest!=null){a2.hl.oi=+q2.openInterest;a2.hl.oiHist.push({t:t,v:a2.hl.oi});a2.hl.oiHist=a2.hl.oiHist.slice(-1000)}
@@ -1535,7 +1591,7 @@ function renderCapital(){
   try{
     var p=portfolioState(),a=portfolioAudit(),all=0;for(var hi=0;hi<H.length;hi++)all+=globalStatsFor(H[hi]).n;
     var auditCls=a.ok?'up':'down',auditTxt=(a.ok?'RECONCILE OK':'RECONCILE ERROR')+' · écart '+a.delta.toFixed(6)+' USDC';
-    $('capitalCards').innerHTML='<div class="capitalBox" style="grid-column:1/-1"><div class="title"><b>V16.4.5 · CAPITAL RÉEL-ÉQUIVALENT · '+P.universe.length+' ACTIFS</b><span class="badge '+auditCls+'">'+auditTxt+'</span></div><b class="'+(p.capital>=p.capitalBase?'up':'down')+'">'+nfmt(p.capital,2)+' USDC</b><div class="capitalSub">Départ '+nfmt(p.capitalBase,2)+' · réalisé net '+nfmt(p.realizedNet,2)+' · DD '+(p.maxDD*100).toFixed(2)+'% · frais '+nfmt(p.fees,2)+' · trades '+p.trades+' · positions '+Object.keys(p.positions||{}).length+'/'+P.maxConcurrentPositions+'</div></div>'+
+    $('capitalCards').innerHTML='<div class="capitalBox" style="grid-column:1/-1"><div class="title"><b>V16.5.0 · CAPITAL RÉEL-ÉQUIVALENT · '+P.universe.length+' ACTIFS</b><span class="badge '+auditCls+'">'+auditTxt+'</span></div><b class="'+(p.capital>=p.capitalBase?'up':'down')+'">'+nfmt(p.capital,2)+' USDC</b><div class="capitalSub">Départ '+nfmt(p.capitalBase,2)+' · réalisé net '+nfmt(p.realizedNet,2)+' · DD '+(p.maxDD*100).toFixed(2)+'% · frais '+nfmt(p.fees,2)+' · trades '+p.trades+' · positions '+Object.keys(p.positions||{}).length+'/'+P.maxConcurrentPositions+'</div></div>'+
       H.map(function(h){var s=globalStatsFor(h);return'<div class="capitalBox"><div class="title"><b>OOS '+hlabel(h)+'</b><span class="badge">'+s.n+' observations</span></div><b>'+ (finite(s.net)?(s.net*10000).toFixed(2)+' bps':'—') +'</b><div class="capitalSub">Brier '+nfmt(s.b,4)+' · Hit '+pct(s.hit,1)+' · calibration profit L '+profitCount(h,'LONG')+' / S '+profitCount(h,'SHORT')+'</div></div>'}).join('');
   }catch(e){$('capitalCards').innerHTML='<div class="note">Performance indisponible temporairement : '+String(e.message||e)+'</div>';}
 }
@@ -1597,7 +1653,7 @@ function dashboard(){
   var ages=[S.hl.lastBook,S.hl.lastTrades,S.hl.lastCtx].filter(function(x){return x>0}).map(function(x){return Math.max(0,now()-x)/1000});$('kFresh').textContent=ages.length?Math.round(Math.max.apply(null,ages))+'s':'—';
   $('chartInfo').textContent='HL '+nfmt(S.hl.price)+' · focus dynamique '+P.focusCoin;
   try{renderCapital()}catch(e){}try{renderPortfolio()}catch(e){}try{renderHealth()}catch(e){}try{journal()}catch(e){}
-  $('audit').textContent='V16.4.5 = univers crypto-only et comptabilité propre. Seul le perpétuel natif Hyperliquid (DEX "") est admis; les DEX HIP-3, dont XYZ, sont exclus dès la découverte, des flux WS et du portefeuille. Le changement d’univers force un nouvel epoch de calibration;  Le capital V15/V16 précédent est archivé et exclu du nouveau rendement; le modèle repart de zéro sur les données de prix puis apprend uniquement sur les observations live OOS valides. Chaque marché est évalué sur les horizons '+TRADE_H.join('/')+' min, puis le meilleur horizon par actif est comparé aux autres actifs. Les shadow forecasts OOS sont créés même lorsque NO TRADE est affiché; à résolution, leur rendement net après frais, slippage et spread alimente la calibration globale et locale. Aucune donnée Binance n’est nécessaire à la décision. Les nouvelles positions sont limitées aux meilleures opportunités; la phase SEED est strictement shadow-only : elle ne mobilise aucun capital; elle collecte les résultats OOS de la politique TP/SL avant autorisation de FULL, tandis que le portefeuille peut utiliser jusqu’à 8 positions dans le budget de risque agrégé; un time-stop empêche une position de monopoliser le capital. Rentabilité non présumée : elle doit être démontrée par le rendement net OOS.';
+  $('audit').textContent='V16.5.0 = univers crypto-only et comptabilité propre. Seul le perpétuel natif Hyperliquid (DEX "") est admis; les DEX HIP-3, dont XYZ, sont exclus dès la découverte, des flux WS et du portefeuille. Le changement d’univers force un nouvel epoch de calibration;  Le capital V15/V16 précédent est archivé et exclu du nouveau rendement; le modèle repart de zéro sur les données de prix puis apprend uniquement sur les observations live OOS valides. Chaque marché est évalué sur les horizons '+TRADE_H.join('/')+' min, puis le meilleur horizon par actif est comparé aux autres actifs. Les shadow forecasts OOS sont créés même lorsque NO TRADE est affiché; à résolution, leur rendement net après frais, slippage et spread alimente la calibration globale et locale. Aucune donnée Binance n’est nécessaire à la décision. Les nouvelles positions sont limitées aux meilleures opportunités; la phase SEED est strictement shadow-only : elle ne mobilise aucun capital; elle collecte les résultats OOS de la politique TP/SL avant autorisation de FULL, tandis que le portefeuille peut utiliser jusqu’à 8 positions dans le budget de risque agrégé; un time-stop empêche une position de monopoliser le capital. Rentabilité non présumée : elle doit être démontrée par le rendement net OOS.';
 }
 function migrateV16(){
   if(DB.accountingEpoch===16.44)return;
@@ -1605,7 +1661,7 @@ function migrateV16(){
   DB.legacyV15=DB.legacyV15||{portfolio:oldP,profit:DB.profit||{},obs:DB.obs||{}};
   DB.legacyV16=DB.legacyV16||{portfolio:oldP,profit:DB.profit||{},exec:DB.exec||{},obs:DB.obs||{}};
   DB.legacyV162=DB.legacyV162||{portfolio:oldP,profit:DB.profit||{},exec:DB.exec||{},obs:DB.obs||{}};
-  // V16.4.5 démarre un nouvel epoch propre : les anciens portefeuille et calibrations de politique sont archivés et exclus.
+  // V16.5.0 démarre un nouvel epoch propre : les anciens portefeuille et calibrations de politique sont archivés et exclus.
   DB.portfolio={capitalBase:S.capital,capital:S.capital,peak:S.capital,maxDD:0,realizedNet:0,fees:0,wins:0,losses:0,trades:0,positions:{},log:[],epoch:16.44,startedAt:now()};
   DB.profit={global:{},asset:{}};
   DB.exec={global:{},asset:{}};
@@ -1654,8 +1710,7 @@ async function boot(){
     }
     try{hydratePersistent().then(function(){migrateV16();dashboard()}).catch(function(e){diagError('persistence',e);dashboard()})}catch(e){diagError('persistence',e)}
     stage('CONNECTING');reconnectHL();
-    restSync().then(function(){
-      portfolioScan();
+    restSync().then(function(){return refreshAcademicStrategy(true)}).then(function(){portfolioScan();
       dashboard();
       return portfolioBootstrap();
     }).then(function(){
@@ -1667,7 +1722,7 @@ async function boot(){
       if(now()-S.lastRest>30000)restSync().then(function(){return portfolioBootstrap()}).catch(function(e){diagError('REST_LOOP',e)});
       updatePortfolioPositions();updatePaperPositions();
       resolve().catch(function(e){diagError('RESOLVE',e)});
-      if(now()-lastScanLoop>=10000){lastScanLoop=now();try{portfolioScan()}catch(e){diagError('SCAN_LOOP',e)}}
+      if(now()-lastScanLoop>=10000){lastScanLoop=now();try{portfolioScan()}catch(e){diagError('SCAN_LOOP',e)}}if(P.universe.length&&(!P.strategyLastRefresh||now()-P.strategyLastRefresh>=P.strategyRebalanceMs))refreshAcademicStrategy(false).then(function(){try{portfolioScan()}catch(e){diagError('STRATEGY_SCAN',e)}}).catch(function(e){diagError('STRATEGY_REFRESH',e)});
       try{dashboard()}catch(e){diagError('RENDER_LOOP',e)}
     },2000);
     setInterval(function(){
