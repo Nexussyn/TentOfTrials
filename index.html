@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Crypto Direction Engine — V13.4</title>
+<title>Crypto Direction Engine — V14.0 NET-EV</title>
 <style>
 :root{--bg:#061016;--p:#0c1a22;--p2:#09161d;--l:#243843;--t:#edf4f7;--m:#8ea3ad;--u:#43d19d;--d:#ff7082;--n:#f0bf55;--c:#67d7ef}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 15% 0,#122a32,#061016 42%,#050b0f);color:var(--t);font:14px/1.4 system-ui,-apple-system,Segoe UI,sans-serif}
@@ -32,7 +32,7 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
 <body>
 <header class="top">
   <div>
-    <div class="brand">CRYPTO DIRECTION ENGINE · V13.4</div>
+    <div class="brand">CRYPTO DIRECTION ENGINE · V14.0 NET-EV</div>
     <div class="tag">Hyperliquid primaire · Binance cross-venue · self-evaluating · persistance double · OOS résoluble après fermeture · aucune exécution réelle</div>
   </div>
   <div class="ctrl">
@@ -41,6 +41,7 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
     <input id="capital" type="number" value="1000" min="10" step="10" title="Capital de référence en USDC">
     <input id="risk" type="number" value="0.5" min="0.05" max="5" step="0.05" title="Risque maximum théorique par idée, en % du capital">
     <input id="fee" type="number" value="4.5" min="0" max="20" step="0.1" title="Frais taker simulés par côté, en bps">
+    <input id="slip" type="number" value="1.5" min="0" max="20" step="0.1" title="Slippage conservateur par côté, en bps">
     <button id="relearn" title="Initialise le modèle une fois à partir de l'historique prix; ne détruit pas l'apprentissage live">Warm-start</button>
   </div>
 </header>
@@ -346,7 +347,7 @@ async function hydratePersistent(){
   save();
 }
 var S={
-  coin:'BTC',h:5,capital:1000,risk:.5,fee:4.5,lastForecast:0,lastRender:0,lastRest:0,
+  coin:'BTC',h:5,capital:1000,risk:.5,fee:4.5,slip:1.5,lastForecast:0,lastRender:0,lastRest:0,
   hl:{price:NaN,book:null,oi:NaN,funding:NaN,candles:[],trades:[],oiHist:[],lastPrice:0,lastBook:0,lastTrades:0,lastCtx:0},
   bn:{price:NaN,oi:NaN,funding:NaN,spot:[],perp:[],liq:[],oiHist:[],lastMark:0,lastSpot:0,lastPerp:0,lastLiq:0,lastRest:0},
   tape:[],feed:{HL_WS:'INIT',HL_L2:'INIT',HL_TRADES:'INIT',HL_CANDLE:'INIT',HL_CTX:'INIT',BN_WS:'INIT',BN_REST:'INIT',BN_SPOT:'INIT'}
@@ -356,7 +357,7 @@ var S={
 var P={
   assets:['BTC','ETH','SOL','XRP','DOGE','SUI','AVAX','LINK','AAVE','LTC','BCH','ADA','HYPE','ENA','ARB'],
   universe:['BTC','ETH','SOL','XRP','DOGE','SUI','AVAX','LINK','AAVE','LTC','BCH','ADA','HYPE','ENA','ARB'],
-  states:{},volume:{},wsSubscribed:{},maxAssets:15,maxSlots:10,maxLeverage:5,maxMarginPct:.20,h:5,
+  states:{},volume:{},wsSubscribed:{},maxAssets:15,maxSlots:10,maxLeverage:5,maxMarginPct:.20,maxPortfolioRiskPct:.02,maxSameSide:4,h:5,
   lastScan:0,lastMeta:0,lastBootstrap:0,bootstrapped:{},positions:{},cooldown:{},signalsRows:[]
 };
 function newAssetState(){
@@ -395,24 +396,27 @@ function portfolioRiskOpen(p){
 function portfolioOpen(coin,h,f,pl){
   var p=portfolioState(),ks=Object.keys(p.positions||{}),t=now();
   if(h!==P.h||ks.length>=P.maxSlots||p.positions[coin])return false;
+  if((model(h,'base').seen||0)<120)return false;
   if(pl.direction!=='LONG'&&pl.direction!=='SHORT')return false;
   if(!finite(pl.entry)||!finite(pl.sl)||!finite(pl.tp)||!finite(f.atr)||f.atr<=0)return false;
   if(P.cooldown[coin]&&t<P.cooldown[coin])return false;
-  var riskCash=p.capital*(S.risk/100),riskDist=Math.abs(pl.entry-pl.sl),feePerUnit=(Math.abs(pl.entry)+Math.abs(pl.sl))*(S.fee/10000),size=riskDist>0&&finite(feePerUnit)?riskCash/(riskDist+feePerUnit):NaN;
+  var sameSide=ks.filter(function(k){return p.positions[k]&&p.positions[k].direction===pl.direction}).length;
+  if(sameSide>=P.maxSameSide)return false;
+  var portfolioBudget=p.capital*P.maxPortfolioRiskPct,remainingRisk=Math.max(0,portfolioBudget-portfolioRiskOpen(p)),riskCash=Math.min(p.capital*(S.risk/100),remainingRisk),riskDist=Math.abs(pl.entry-pl.sl),feePerUnit=executionCostPerUnit(pl.entry,pl.sl,spreadBps(f)),size=riskDist>0&&finite(feePerUnit)&&riskCash>0?riskCash/(riskDist+feePerUnit):NaN;
   if(!finite(size)||size<=0)return false;
   var notional=Math.abs(size*pl.entry),margin=notional/P.maxLeverage,free=Math.max(0,p.capital-portfolioMarginUsed(p)),marginCap=p.capital*P.maxMarginPct;
   if(margin>marginCap){size=(marginCap*P.maxLeverage)/pl.entry;notional=Math.abs(size*pl.entry);margin=notional/P.maxLeverage}
   if(margin>free*0.98){size=(free*0.98*P.maxLeverage)/pl.entry;notional=Math.abs(size*pl.entry);margin=notional/P.maxLeverage}
   if(!(margin>0&&margin<=free))return false;
   var actualRiskCash=size*(riskDist+feePerUnit);
-  p.positions[coin]={coin:coin,h:h,ts:t,direction:pl.direction,entry:pl.entry,sl:pl.sl,tp:pl.tp,size:size,notional:notional,margin:margin,riskCash:actualRiskCash,paperFee:S.fee,lastTs:t,prob:pl.pd,edge:pl.edge,ev:pl.ev};
+  p.positions[coin]={coin:coin,h:h,ts:t,direction:pl.direction,entry:pl.entry,sl:pl.sl,tp:pl.tp,size:size,notional:notional,margin:margin,riskCash:actualRiskCash,paperFee:S.fee,paperSlip:S.slip,spreadBps:spreadBps(f),lastTs:t,prob:pl.pd,edge:pl.edge,ev:pl.ev};
   DB.portfolio=p;save();return true;
 }
 function portfolioSettle(coin,exit,reason,ts){
   var p=portfolioState(),pos=p.positions[coin];if(!pos||!finite(exit))return false;
-  var dir=pos.direction==='LONG'?1:-1,gross=pos.size*(exit-pos.entry)*dir,fee=pos.paperFee!=null?pos.paperFee:S.fee,fees=(Math.abs(pos.size*pos.entry)+Math.abs(pos.size*exit))*(fee/10000),net=gross-fees;
-  p.capital+=net;p.peak=Math.max(p.peak,p.capital);p.maxDD=Math.max(p.maxDD,p.peak>0?1-p.capital/p.peak:0);p.fees+=fees;p.trades++;if(net>=0)p.wins++;else p.losses++;
-  p.log.push({coin:coin,h:pos.h,ts:pos.ts,exitTs:ts||now(),direction:pos.direction,entry:pos.entry,exit:exit,sl:pos.sl,tp:pos.tp,size:pos.size,margin:pos.margin,gross:gross,fees:fees,net:net,reason:reason});
+  var dir=pos.direction==='LONG'?1:-1,gross=pos.size*(exit-pos.entry)*dir,fee=pos.paperFee!=null?pos.paperFee:S.fee,slip=pos.paperSlip!=null?pos.paperSlip:S.slip,fees=(Math.abs(pos.size*pos.entry)+Math.abs(pos.size*exit))*(fee/10000),slippage=(Math.abs(pos.size*pos.entry)+Math.abs(pos.size*exit))*(slip/10000),spreadCost=Math.abs(pos.size*pos.entry)*(finite(pos.spreadBps)?pos.spreadBps:0)/10000,net=gross-fees-slippage-spreadCost;
+  p.capital+=net;p.peak=Math.max(p.peak,p.capital);p.maxDD=Math.max(p.maxDD,p.peak>0?1-p.capital/p.peak:0);p.fees+=fees+slippage+spreadCost;p.trades++;if(net>=0)p.wins++;else p.losses++;
+  p.log.push({coin:coin,h:pos.h,ts:pos.ts,exitTs:ts||now(),direction:pos.direction,entry:pos.entry,exit:exit,sl:pos.sl,tp:pos.tp,size:pos.size,margin:pos.margin,gross:gross,fees:fees,slippage:slippage,spreadCost:spreadCost,net:net,reason:reason});
   p.log=p.log.slice(-1000);delete p.positions[coin];P.cooldown[coin]=now()+60000;DB.portfolio=p;save();return true;
 }
 function updatePortfolioPositions(){
@@ -434,11 +438,26 @@ function portfolioMark(coin){
   if(pos&&finite(price)){
     var dir=pos.direction==='LONG'?1:-1,fee=pos.paperFee!=null?pos.paperFee:S.fee;
     var gross=pos.size*(price-pos.entry)*dir;
-    var fees=(Math.abs(pos.size*pos.entry)+Math.abs(pos.size*price))*(fee/10000);
-    unreal=gross-fees;
+    var slip=pos.paperSlip!=null?pos.paperSlip:S.slip,fees=(Math.abs(pos.size*pos.entry)+Math.abs(pos.size*price))*(fee/10000),slippage=(Math.abs(pos.size*pos.entry)+Math.abs(pos.size*price))*(slip/10000),spreadCost=Math.abs(pos.size*pos.entry)*(finite(pos.spreadBps)?pos.spreadBps:0)/10000;
+    unreal=gross-fees-slippage-spreadCost;
   }
   var realized=portfolioRealizedByCoin(portfolioState(),coin);
   return{price:price,pos:pos,realized:realized,unreal:unreal,total:realized+(finite(unreal)?unreal:0)};
+}
+function bootstrapPortfolioModel(coin){
+  var h=P.h,a=ensureAsset(coin),bars=a.hl.candles.slice(-500);
+  if(bars.length<180)return false;
+  return withAsset(coin,function(){
+    var bm=model(h,'base'),fm=model(h,'full');
+    if((bm.seen||0)>=120)return true;
+    for(var i=80;i<bars.length-h;i+=3){
+      var c=bars.slice(0,i+1),clo=c.map(function(q){return q.c}),f={r1:ret(clo,1),r5:ret(clo,5),r15:ret(clo,15),r60:ret(clo,60),ema:ema(clo.slice(-180),9)/ema(clo.slice(-180),21)-1,l2:NaN,micro:NaN,flow:NaN,absorption:NaN,funding:NaN,basis:NaN,spotPerp:NaN,doi:NaN,liq:NaN,pasr:NaN,atr:atr(c.slice(-120))};
+      var r=bars[i+h].c/bars[i].c-1,thr=targetThreshold(bars[i].c,f.atr,h),target=labelFromReturn(r,thr),vb=vec(f,false),zb=forecastLogits(bm,vb),pb=sigmoid(zb),vf=vec(f,true),zf=forecastLogits(fm,vf),pf=sigmoid(zf);
+      update(bm,target,pb,vb,false);update(fm,target,pf,vf,false);
+    }
+    calibrate(bm,'PRETRAIN');calibrate(fm,'PRETRAIN');
+    return (bm.seen||0)>=120;
+  });
 }
 function portfolioScan(){
   P.h=S.h;var h=P.h,p=portfolioState(),rows=[],positions=p.positions||{};
@@ -488,6 +507,12 @@ function ret(a,n){return a.length>n?a[a.length-1]/a[a.length-1-n]-1:NaN}
 function atr(a,n){n=n||14;if(a.length<n+1)return NaN;var s=0;for(var i=a.length-n;i<a.length;i++){var p=a[i-1],q=a[i];s+=Math.max(q.h-q.l,Math.abs(q.h-p.c),Math.abs(q.l-p.c))}return s/n}
 function fresh(ts,maxAge){return ts>0&&(now()-ts)<=maxAge}
 function histFresh(ts,maxAge){return ts>0&&(Math.abs(now()-ts)<=maxAge)}
+function spreadBps(f){return f&&f.depth&&finite(f.depth.spread)?f.depth.spread*10000:NaN}
+function roundTripCostBps(f){var sp=spreadBps(f);return finite(sp)?2*S.fee+2*S.slip+sp:NaN}
+function executionCostPerUnit(entry,exit,spread){
+  var sp=finite(spread)?spread:0, commission=(Math.abs(entry)+Math.abs(exit))*(S.fee/10000), slip=(Math.abs(entry)+Math.abs(exit))*(S.slip/10000), spr=Math.abs(entry)*(sp/10000);
+  return finite(commission+slip+spr)?commission+slip+spr:NaN;
+}
 function depth(book){
   if(!book||!book.levels||!book.levels[0]||!book.levels[1])return{};
   var B=book.levels[0].slice(0,10),A=book.levels[1].slice(0,10); if(!B.length||!A.length)return{};
@@ -552,7 +577,9 @@ function vec(f,full){
   return v;
 }
 function pred(h,f,k){
-  var m=model(h,k),v=vec(f,k==='full'),z=m.b.slice();
+  var m=model(h,k),ff=Object.assign({},f);
+  if(k==='full'&&pasrVerdict(h)!=='HELPING')ff.pasr=NaN;
+  var v=vec(ff,k==='full'),z=m.b.slice();
   for(var i=0;i<3;i++)for(var j=0;j<v.length;j++)z[i]+=(m.w[i][j]||0)*v[j];
   return{p:sigmoid(z.map(function(x){return x/(m.temp||1)})),v:v,m:m};
 }
@@ -604,15 +631,15 @@ function grid(h,dir){
   }
   return DB.grid[key];
 }
-function pairCurrentEV(g,pd,po,entry,atr,fee){
-  if(!finite(entry)||!finite(atr)||entry<=0)return NaN;
-  var feeRet=2*fee/10000, tpRet=atr*g.tp/entry, slRet=atr*g.sl/entry;
-  return pd*tpRet-po*slRet-feeRet;
+function pairCurrentEV(g,pd,po,entry,atr,costBps){
+  if(!finite(entry)||!finite(atr)||entry<=0||!finite(costBps))return NaN;
+  var costRet=costBps/10000, tpRet=atr*g.tp/entry, slRet=atr*g.sl/entry;
+  return pd*tpRet-po*slRet-costRet;
 }
-function bestPair(h,dir,pd,po,entry,atr){
-  var g=grid(h,dir),fee=S.fee,rank=g.map(function(x){
-    var cur=pairCurrentEV(x,pd,po,entry,atr,fee),riskDen=atr*x.sl;
-    var feeR=entry>0&&riskDen>0?entry*(2*fee/10000)/riskDen:NaN;
+function bestPair(h,dir,pd,po,entry,atr,f){
+  var g=grid(h,dir),costBps=roundTripCostBps(f),rank=g.map(function(x){
+    var cur=pairCurrentEV(x,pd,po,entry,atr,costBps),riskDen=atr*x.sl;
+    var feeR=entry>0&&riskDen>0&&finite(costBps)?entry*(costBps/10000)/riskDen:NaN;
     var learned=finite(x.ev)?x.ev:NaN;
     var score=finite(cur)&&finite(learned)&&x.n>=15?(0.65*(cur/(atr/entry||1))-0.0+0.35*learned):finite(cur)?(cur/(atr/entry||1)): (finite(learned)?learned:-Infinity);
     return{x:x,cur:cur,score:score};
@@ -622,22 +649,23 @@ function bestPair(h,dir,pd,po,entry,atr){
 }
 function orderPlan(h,f,m){
   var pL=m.p[2],pN=m.p[1],pS=m.p[0],dir=pL>=pS?'LONG':'SHORT',pd=dir==='LONG'?pL:pS,po=dir==='LONG'?pS:pL;
-  var d=f.depth||{},entry=dir==='LONG'?d.ask:d.bid,a=finite(f.atr)?f.atr:(finite(S.hl.price)?S.hl.price*.0025:NaN),q=dataQuality(f),pair=bestPair(h,dir,pd,po,entry,a),riskCash=S.capital*S.risk/100;
-  var riskDist=a*pair.sl,sl=dir==='LONG'?entry-riskDist:entry+riskDist,tp=dir==='LONG'?entry+a*pair.tp:entry-a*pair.tp,rr=pair.tp/pair.sl,feePerUnit=(finite(entry)&&finite(sl)?(entry+sl)*(S.fee/10000):NaN),sz=riskDist>0&&finite(feePerUnit)?riskCash/(riskDist+feePerUnit):NaN;
-  var feeR=entry&&a&&pair.sl?entry*((S.fee*2)/10000)/(a*pair.sl):0,evR=(pd*pair.tp)-(po*pair.sl)-feeR,evRet=entry&&a?(pd*(a*pair.tp/entry)-po*(a*pair.sl/entry)-(S.fee*2/10000)):NaN,edge=pd-po;
+  var d=f.depth||{},entry=dir==='LONG'?d.ask:d.bid,a=finite(f.atr)?f.atr:(finite(S.hl.price)?S.hl.price*.0025:NaN),q=dataQuality(f),costBps=roundTripCostBps(f),pair=bestPair(h,dir,pd,po,entry,a,f),riskCash=S.capital*S.risk/100;
+  var riskDist=a*pair.sl,sl=dir==='LONG'?entry-riskDist:entry+riskDist,costPerUnit=(finite(entry)&&finite(sl)?executionCostPerUnit(entry,sl,spreadBps(f)):NaN),sz=riskDist>0&&finite(costPerUnit)?riskCash/(riskDist+costPerUnit):NaN;
+  var feeR=entry&&a&&pair.sl&&finite(costBps)?entry*(costBps/10000)/(a*pair.sl):NaN,evR=(pd*pair.tp)-(po*pair.sl)-feeR,evRet=entry&&a&&finite(costBps)?(pd*(a*pair.tp/entry)-po*(a*pair.sl/entry)-costBps/10000):NaN,edge=pd-po;
   var es=m.score,align=finite(es)?(dir==='LONG'?es: -es):NaN, strongEvidence=finite(align)&&align>=.12;
   var gateReasons=[];
   if(!finite(entry)||!finite(a)||!finite(f.l2))gateReasons.push('L2/ATR');
   if(q<75)gateReasons.push('DQ<75');
-  if(pd<.47)gateReasons.push('prob<47%');
-  if(edge<.055)gateReasons.push('edge<5.5pt');
+  if(pd<.50)gateReasons.push('prob<50%');
+  if(edge<.03)gateReasons.push('edge<3pt');
   if(!strongEvidence)gateReasons.push('evidence');
-  if(!finite(evRet)||evRet<=0)gateReasons.push('EV≤0');
+  if(!finite(costBps)||costBps>12)gateReasons.push('cost>12bps');
+  if(!finite(evRet)||evRet*10000<2)gateReasons.push('EV<2bps');
   var gate=gateReasons.length>0;
   return{
-    direction:gate?'NO TRADE':dir,candidate:dir,pd:pd,po:po,edge:edge,evidence:es,align:align,q:q,
+    direction:gate?'NO TRADE':dir,candidate:dir,pd:pd,po:po,edge:edge,evidence:es,align:align,q:q,costBps:costBps,
     entry:gate?NaN:entry,sl:gate?NaN:sl,tp:gate?NaN:tp,rr:gate?NaN:rr,size:gate?NaN:sz,ev:gate?NaN:evRet,evR:gate?NaN:evR,
-    pair:pair,gateReasons:gateReasons,reason:gate?'Portail fermé : '+gateReasons.join(' · '):'Portail ouvert : direction + évidence + espérance nette.'
+    pair:pair,gateReasons:gateReasons,reason:gate?'Portail fermé : '+gateReasons.join(' · '):'Portail ouvert : direction + évidence + EV nette après frais, spread et slippage.'
   };
 }
 function hlabel(h){return h===1440?'1j':h===60?'1h':h===240?'4h':h+'m'}
@@ -763,14 +791,14 @@ function recordForecast(h,f,m,pl){
   var key=S.coin+'_'+h,arr=DB.pending[key]||[],pstate=paperState(h);
   DB.pending[key]=arr;
   var actionable=(pl.direction==='LONG'||pl.direction==='SHORT')&&finite(pl.entry)&&finite(pl.sl)&&finite(pl.tp)&&!pstate.position&&!paperPendingExists(h);
-  var rec={ts:now(),h:h,coin:S.coin,p0:S.hl.price,paperCapital:S.capital,paperRisk:S.risk,paperFee:S.fee,targetThr:targetThreshold(S.hl.price,f.atr,h),
+  var rec={ts:now(),h:h,coin:S.coin,p0:S.hl.price,paperCapital:S.capital,paperRisk:S.risk,paperFee:S.fee,targetThr:targetThreshold(S.hl.price,f.atr,h),spreadBps:spreadBps(f),paperSlip:S.slip,
     pBase:m.base.p.slice(),pFull:m.full.p.slice(),vBase:m.base.v.slice(),vFull:m.full.v.slice(),candidate:pl.candidate,entry:finite(pl.entry)?pl.entry:S.hl.price,
     direction:pl.direction,dir:pl.direction,atr:f.atr,pair:pl.pair||null,sl:pl.sl,tp:pl.tp,rr:pl.rr,paper:false};
   if(actionable){
     var riskDist=Math.abs(pl.entry-pl.sl),riskCash=pstate.capital*(rec.paperRisk)/100,feePerUnit=(finite(pl.entry)&&finite(pl.sl)?(Math.abs(pl.entry)+Math.abs(pl.sl))*(rec.paperFee/10000):NaN),sz=riskDist>0&&finite(feePerUnit)?riskCash/(riskDist+feePerUnit):NaN;
     if(finite(sz)&&sz>0){
       rec.paper=true;rec.size=sz;
-      pstate.position={ts:rec.ts,direction:rec.direction,entry:rec.entry,sl:rec.sl,tp:rec.tp,size:sz,paperFee:rec.paperFee,lastTs:rec.ts,closed:false};
+      pstate.position={ts:rec.ts,direction:rec.direction,entry:rec.entry,sl:rec.sl,tp:rec.tp,size:sz,paperFee:rec.paperFee,paperSlip:rec.paperSlip,spreadBps:rec.spreadBps,lastTs:rec.ts,closed:false};
       save();
     }
   }
@@ -831,7 +859,7 @@ function learnGrid(h,p,pathObj){
       }
     }
     if(out===null){var last=pathObj.mode==='TICK'?items[items.length-1].p:items[items.length-1].c;out=dir>0?(last-p.entry)/p.atr:(p.entry-last)/p.atr}
-    var feeR=p.entry*(2*(p.paperFee!=null?p.paperFee:S.fee)/10000)/(p.atr*x.sl);out-=feeR;
+    var costBps=2*(p.paperFee!=null?p.paperFee:S.fee)+2*(p.paperSlip!=null?p.paperSlip:S.slip)+(finite(p.spreadBps)?p.spreadBps:0),feeR=p.entry*(costBps/10000)/(p.atr*x.sl);out-=feeR;
     x.n++;x.ev=finite(x.ev)?((x.ev*(x.n-1))+out)/x.n:out;
   }
   save();
@@ -852,7 +880,7 @@ async function resolve(){
             else keep.push(p);
             continue;
           }
-          var r=at.p/p.p0-1,target=labelFromReturn(r,finite(p.targetThr)?p.targetThr:targetThreshold(p.p0,p.atr,h));
+          var r=at.p/p.p0-1,target=labelFromReturn(r,finite(p.targetThr)?p.targetThr:targetThreshold(p.p0,p.atr,h)),sgn=p.candidate==='LONG'?1:-1,netRet=sgn*(at.p-p.entry)/(p.entry||p.p0)-((2*(p.paperFee!=null?p.paperFee:S.fee)+2*(p.paperSlip!=null?p.paperSlip:S.slip)+(finite(p.spreadBps)?p.spreadBps:0))/10000);
           var base=model(h,'base'),full=model(h,'full'),vb=safeVector(p.vBase,30),vf=safeVector(p.vFull,30),prB=null,prF=null;
           if(vb&&vf){
             var baseLog=forecastLogits(base,vb),fullLog=forecastLogits(full,vf);
@@ -873,7 +901,7 @@ async function resolve(){
             DB.legacyResolved=(DB.legacyResolved||0)+1;
           }
           if(!DB.obs[key])DB.obs[key]=[];
-          DB.obs[key].push({ts:p.ts,target:target,pb:prB,pf:prF,source:vb&&vf?'LIVE':'LEGACY'});
+          DB.obs[key].push({ts:p.ts,target:target,pb:prB,pf:prF,netRet:finite(netRet)?netRet:NaN,source:vb&&vf?'LIVE':'LEGACY'});
           DB.obs[key]=DB.obs[key].slice(-500);
           if(p.paper){
             learnGrid(h,p,path);
@@ -896,7 +924,8 @@ function statsFor(h){
   if(!o.length)return{n:0,b:NaN,ll:NaN,hit:NaN,roll:NaN,delta:NaN,ciLo:NaN,ciHi:NaN};
   var bs=o.map(function(x){return brier(x.pf,x.target)}),ls=o.map(function(x){return logloss(x.pf,x.target)}),hits=o.map(function(x){return x.pf.indexOf(Math.max.apply(null,x.pf))===x.target?1:0}),recent=bs.slice(-50);
   var dif=o.map(function(x){return brier(x.pb,x.target)-brier(x.pf,x.target)}),md=metricArr(dif),sd=Math.sqrt(dif.reduce(function(s,x){return s+(x-md)*(x-md)},0)/Math.max(1,dif.length-1)),se=sd/Math.sqrt(Math.max(1,dif.length)),margin=1.96*se;
-  return{n:o.length,b:metricArr(bs),ll:metricArr(ls),hit:metricArr(hits),roll:metricArr(recent),delta:md,ciLo:md-margin,ciHi:md+margin};
+  var net=o.map(function(x){return x.netRet}).filter(finite);
+  return{n:o.length,b:metricArr(bs),ll:metricArr(ls),hit:metricArr(hits),roll:metricArr(recent),delta:md,ciLo:md-margin,ciHi:md+margin,net:metricArr(net)};
 }
 function pasrVerdict(h){
   var s=statsFor(h);
@@ -1033,11 +1062,12 @@ async function portfolioBootstrap(){
       }catch(e){}
     }));
   }
+  for(var mi=0;mi<list.length;mi++){var cc=list[mi],aa=ensureAsset(cc);if(aa.hl.candles.length>=180)try{bootstrapPortfolioModel(cc)}catch(e){}}
   if(done)save();return{done:done,assets:list.length};
 }
 async function warmStart(){
   var key=S.coin,meta=DB.pretrain[key]||{}; meta.h=meta.h||{};
-  if(H.every(function(h){return meta.h[h]&&meta.h[h].done})){ $('learningNote').textContent='PRETRAIN déjà présent pour '+S.coin+' : le Warm-start ne réinitialise plus le live. Build V13.4.'; $('modeBadge').textContent='LIVE'; dashboard(); return; }
+  if(H.every(function(h){return meta.h[h]&&meta.h[h].done})){ $('learningNote').textContent='PRETRAIN déjà présent pour '+S.coin+' : le Warm-start ne réinitialise plus le live. Build V14.0 NET-EV.'; $('modeBadge').textContent='LIVE'; dashboard(); return; }
   $('modeBadge').textContent='PRETRAIN';$('learningNote').textContent='Warm-start en cours : historique 1m prix sur la fenêtre maximale publique d’environ 3,4 jours. Le L2 historique complet n’est pas simulé.';
   meta.started=meta.started||now();DB.pretrain[key]=meta;save();
   for(var hi=0;hi<H.length;hi++){
@@ -1129,7 +1159,7 @@ function dashboard(){
   $('hist').textContent=(DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[S.h]&&DB.pretrain[S.coin].h[S.h].n)||0;$('live').textContent=st.n;$('brier').textContent=nfmt(st.b,4);$('logloss').textContent=nfmt(st.ll,4);$('hit').textContent=pct(st.hit,1);$('roll').textContent=nfmt(st.roll,4);$('pend').textContent=(DB.pending[S.coin+'_'+S.h]||[]).length;
   $('learnState').textContent=st.n<30?'LEARNING':st.n<100?'CALIBRATING': 'ADAPTIVE';
   $('kPrice').textContent=nfmt(S.hl.price,2);$('kDQ').textContent=q+'/100';$('kMix').textContent=Math.round(m.alpha*100)+'% FULL · '+(model(S.h,'full').liveSeen||0)+' live';$('kEdge').textContent=finite(pl.edge)?((pl.edge>=0?'+':'')+(pl.edge*100).toFixed(1)+' pt'):'—';var ages=[S.hl.lastBook,S.hl.lastTrades,S.bn.lastPerp,S.bn.lastMark].filter(function(x){return x>0}).map(function(x){return Math.max(0,now()-x)/1000});$('kFresh').textContent=ages.length?Math.round(Math.max.apply(null,ages))+'s':'—';
-  $('chartInfo').textContent='HL '+nfmt(S.hl.price)+' · BN '+nfmt(S.bn.price);try{renderCapital()}catch(e){} try{renderPortfolio()}catch(e){} try{renderHealth()}catch(e){} try{journal()}catch(e){} $('audit').textContent='CAPITAL PAPER = une simulation indépendante par horizon, une seule position active à la fois; sizing au risque '+S.risk+'% de l\'equity, entry/SL/TP enregistrés à t0, sizing incluant le coût du stop + frais aller-retour, frais '+S.fee+' bps/side, funding exclu. Le signal combine modèle appris + evidence prior temporaire, puis retire progressivement le prior avec les OOS live. PRETRAIN prix = '+((DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[S.h]&&DB.pretrain[S.coin].h[S.h].n)||0)+' labels pour '+hlabel(S.h)+'; non présenté comme OOS full. LIVE OOS = prévision gelée à t0 puis résolue au prix observé à t0+h. BASE exclut les features microstructurelles/PASR; FULL les apprend en live. PASR = feature expérimentale, verdict par différence Brier appariée + IC approximatif à 95 %. Warm-start ne réinitialise plus le live.';
+  $('chartInfo').textContent='HL '+nfmt(S.hl.price)+' · BN '+nfmt(S.bn.price);try{renderCapital()}catch(e){} try{renderPortfolio()}catch(e){} try{renderHealth()}catch(e){} try{journal()}catch(e){} $('audit').textContent='CAPITAL PAPER = une simulation indépendante par horizon, une seule position active à la fois; sizing au risque '+S.risk+'% de l\'equity, entry/SL/TP enregistrés à t0, sizing incluant stop + commissions + slippage + spread, frais '+S.fee+' bps/side, slippage '+S.slip+' bps/side, funding exclu. Le signal combine modèle appris + evidence prior temporaire, puis retire progressivement le prior avec les OOS live. PRETRAIN prix = '+((DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[S.h]&&DB.pretrain[S.coin].h[S.h].n)||0)+' labels pour '+hlabel(S.h)+'; non présenté comme OOS full. LIVE OOS = prévision gelée à t0 puis résolue au prix observé à t0+h. BASE exclut les features microstructurelles/PASR; FULL les apprend en live. PASR = feature expérimentale, verdict par différence Brier appariée + IC approximatif à 95 %. Warm-start ne réinitialise plus le live.';
 }
 function syntheticState(){
   var t=now(),base=83250;
@@ -1152,13 +1182,13 @@ function assertSelfTest(){
   if($('journal').textContent.indexOf('1j')<0)throw Error('1j not rendered');
   if($('capitalCards').textContent.replace(/\s/g,'').indexOf('1000')<0)throw Error('capital cards not rendered');
   var b=$('kPrice').textContent;if(!b||b==='—')throw Error('price KPI not rendered');
-  var f=feats(),m=mixed(S.h,f),pl=orderPlan(S.h,f,m);if(!pl||!pl.candidate)throw Error('order plan did not compute');if(!(targetThreshold(83250,45,1440)>=.0015))throw Error('horizon threshold failed');if(!paperState(5)||!paperStats(5))throw Error('paper ledger unavailable');var rs=5,entryT=100,slT=90,feeU=(entryT+slT)*(4.5/10000),szT=rs/(Math.abs(entryT-slT)+feeU);if(Math.abs(szT-(5/(10+feeU)))>1e-12)throw Error('fee-aware sizing failed');
+  var f=feats(),m=mixed(S.h,f),pl=orderPlan(S.h,f,m);if(!pl||!pl.candidate)throw Error('order plan did not compute');if(!(targetThreshold(83250,45,1440)>=.0015))throw Error('horizon threshold failed');if(!paperState(5)||!paperStats(5))throw Error('paper ledger unavailable');var rs=5,entryT=100,slT=90,feeU=(entryT+slT)*(4.5/10000),slipU=(entryT+slT)*(1.5/10000),spr=1.0,costU=feeU+slipU+entryT*(spr/10000),szT=rs/(Math.abs(entryT-slT)+costU);if(Math.abs(szT-(5/(10+costU)))>1e-12)throw Error('execution-cost sizing failed');
   var el=$('bootBanner');el.style.display='block';el.className='panel note diag selftest';el.textContent='CDE SELFTEST PASS · UI + moteur + paper ledger déterministes OK · aucune connexion réseau requise.';
 }
 async function boot(){
   try{
     stage('BOOT');
-    S.coin=$('coin').value;S.h=+$('hor').value;S.capital=+$('capital').value||1000;S.risk=+$('risk').value||.5;S.fee=+$('fee').value||0;
+    S.coin=$('coin').value;S.h=+$('hor').value;S.capital=+$('capital').value||1000;S.risk=+$('risk').value||.5;S.fee=+$('fee').value||0;S.slip=+$('slip').value||1.5;
     for(var pi=0;pi<H.length;pi++)paperState(H[pi]);
     var _pp=portfolioState();if(!finite(_pp.capital)||_pp.capital<=0)_pp.capital=S.capital;if(!finite(_pp.capitalBase)||_pp.capitalBase<=0)_pp.capitalBase=S.capital;DB.portfolio=_pp;
     dashboard();
@@ -1211,6 +1241,7 @@ $('hor').onchange=function(){S.h=+$('hor').value;dashboard()};
 $('capital').oninput=function(){S.capital=+$('capital').value||1000};
 $('risk').oninput=function(){S.risk=+$('risk').value||.5};
 $('fee').oninput=function(){S.fee=+$('fee').value||0};
+$('slip').oninput=function(){S.slip=+$('slip').value||0};
 $('relearn').onclick=function(){var key=S.coin;DB.pretrain[key]=undefined;H.forEach(function(h){DB.models[S.coin+'_'+h]=undefined});save();warmStart().then(function(){dashboard()}).catch(function(e){diagError('RELEARN',e)})};
 boot();
 </script>
