@@ -429,6 +429,7 @@ function portfolioRiskOpen(p){
 function portfolioOpen(coin,h,f,pl){
   var reject=function(reason){P.lastOpenRejects[coin]=reason;return false},p=portfolioState(),ks=Object.keys(p.positions||{}),t=now(),a=ensureAsset(coin);
   if(!marketPriceConsistent(a,a.hl.book))return reject('BOOK_PRICE_MISMATCH');
+  if(a.dex&&a.dex!=='')return reject('DEX_SHADOW_ONLY');
   if(ks.length>=P.maxConcurrentPositions)return reject('POSITION_CAP');
   if(p.positions[coin])return reject('ALREADY_OPEN');
   var localSeen=withAsset(coin,function(){return model(h,'base').seen||0});
@@ -455,7 +456,7 @@ function portfolioOpen(coin,h,f,pl){
 function portfolioSettle(coin,exit,reason,ts){
   var p=portfolioState(),pos=p.positions[coin];if(!pos||!finite(exit))return false;
   var dir=pos.direction==='LONG'?1:-1,gross=pos.size*(exit-pos.entry)*dir,fee=pos.paperFee!=null?pos.paperFee:S.fee,slip=pos.paperSlip!=null?pos.paperSlip:S.slip,fees=(Math.abs(pos.size*pos.entry)+Math.abs(pos.size*exit))*(fee/10000),slippage=(Math.abs(pos.size*pos.entry)+Math.abs(pos.size*exit))*(slip/10000),net=gross-fees-slippage;
-  p.capital+=net;p.peak=Math.max(p.peak,p.capital);p.maxDD=Math.max(p.maxDD,p.peak>0?1-p.capital/p.peak:0);p.fees+=fees+slippage+spreadCost;p.trades++;if(net>=0)p.wins++;else p.losses++;
+  p.capital+=net;p.peak=Math.max(p.peak,p.capital);p.maxDD=Math.max(p.maxDD,p.peak>0?1-p.capital/p.peak:0);p.fees+=fees+slippage;p.trades++;if(net>=0)p.wins++;else p.losses++;
   p.log.push({coin:coin,h:pos.h,ts:pos.ts,exitTs:ts||now(),direction:pos.direction,entry:pos.entry,exit:exit,sl:pos.sl,tp:pos.tp,size:pos.size,margin:pos.margin,gross:gross,fees:fees,slippage:slippage,net:net,reason:reason});
   p.log=p.log.slice(-1000);delete p.positions[coin];P.cooldown[coin]=now()+60000;DB.portfolio=p;save();return true;
 }
@@ -487,11 +488,11 @@ function portfolioRealizedByCoin(p,coin){
   return sum;
 }
 function portfolioMark(coin){
-  var a=ensureAsset(coin),price=finite(a.hl.price)?a.hl.price:NaN,pos=portfolioState().positions&&portfolioState().positions[coin],unreal=NaN;
-  if(pos&&finite(price)){
-    var dir=pos.direction==='LONG'?1:-1,fee=pos.paperFee!=null?pos.paperFee:S.fee;
+  var a=ensureAsset(coin),mark=finite(a.hl.price)?a.hl.price:NaN,pos=portfolioState().positions&&portfolioState().positions[coin],unreal=NaN;
+  if(pos&&marketPriceConsistent(a,a.hl.book)&&fresh(a.hl.lastBook,7000)){
+    var dir=pos.direction==='LONG'?1:-1,d=depth(a.hl.book),price=dir>0?d.bid:d.ask,fee=pos.paperFee!=null?pos.paperFee:S.fee;
     var gross=pos.size*(price-pos.entry)*dir;
-    var slip=pos.paperSlip!=null?pos.paperSlip:S.slip,fees=(Math.abs(pos.size*pos.entry)+Math.abs(pos.size*price))*(fee/10000),slippage=(Math.abs(pos.size*pos.entry)+Math.abs(pos.size*price))*(slip/10000),spreadCost=Math.abs(pos.size*pos.entry)*(finite(pos.spreadBps)?pos.spreadBps:0)/10000;
+    var slip=pos.paperSlip!=null?pos.paperSlip:S.slip,fees=(Math.abs(pos.size*pos.entry)+Math.abs(pos.size*price))*(fee/10000),slippage=(Math.abs(pos.size*pos.entry)+Math.abs(pos.size*price))*(slip/10000);
     unreal=gross-fees-slippage;
   }
   var realized=portfolioRealizedByCoin(portfolioState(),coin);
@@ -1374,32 +1375,17 @@ function dashboard(){
   $('audit').textContent='V16 = portefeuille unique sur tout l’univers Hyperliquid. Les anciens comptes paper par horizon ne pilotent plus l’ouverture. Chaque marché est évalué sur les horizons '+TRADE_H.join('/')+' min, puis le meilleur horizon par actif est comparé aux autres actifs. Les shadow forecasts OOS sont créés même lorsque NO TRADE est affiché; à résolution, leur rendement net après frais, slippage et spread alimente la calibration globale et locale. Aucune donnée Binance n’est nécessaire à la décision. Les nouvelles positions sont limitées aux meilleures opportunités et au budget de risque agrégé; un time-stop empêche une position de monopoliser le capital. Rentabilité non présumée : elle doit être démontrée par le rendement net OOS.';
 }
 function migrateV16(){
-  var p=portfolioState();
-  if(DB.engineVersion!==16){
-    var oldPositions=Object.keys(p.positions||{}).length;
-    if(oldPositions){
-      p.positions={};
-      p.migration=(p.migration||[]).concat([{ts:now(),from:'V15',droppedPositions:oldPositions,reason:'V16_PORTFOLIO_RESET'}]);
-    }
-    DB.paper={};
-    DB.engineVersion=16;
-  }
-  // Rebuild realized-profit calibration idempotently from resolved OOS observations when needed.
-  if(DB.profitBackfillVersion!==1){
-    DB.profit={global:{},asset:{}};
-    Object.keys(DB.obs||{}).forEach(function(key){
-      var m=key.match(/^(.*)_([0-9]+)$/);if(!m)return;
-      var coin=m[1],h=+m[2],arr=DB.obs[key]||[];
-      for(var i=0;i<arr.length;i++){
-        var x=arr[i];
-        if(x&&finite(x.netRet)&&Number.isInteger(x.target)){
-          updateProfitCalibration(h,coin,x.candidate==='SHORT'?'SHORT':'LONG',x.target,x.netRet,true);
-        }
-      }
-    });
-    DB.profitBackfillVersion=1;
-  }
-  DB.portfolio=p;
+  if(DB.accountingEpoch===16.1)return;
+  var oldP=portfolioState();
+  DB.legacyV15=DB.legacyV15||{portfolio:oldP,profit:DB.profit||{},obs:DB.obs||{}};
+  // V16.1 starts a clean real-capital accounting epoch at the configured capital.
+  DB.portfolio={capitalBase:S.capital,capital:S.capital,peak:S.capital,maxDD:0,fees:0,wins:0,losses:0,trades:0,positions:{},log:[],epoch:16.1,startedAt:now()};
+  DB.profit={global:{},asset:{}};
+  DB.obs={};
+  DB.pending={};
+  DB.paper={};
+  DB.profitBackfillVersion=0;
+  DB.accountingEpoch=16.1;
   save();
 }
 function syntheticState(){
