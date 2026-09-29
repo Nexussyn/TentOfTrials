@@ -387,7 +387,7 @@ var P={
   focusCoin:'',focusH:5,
   maxAssets:Infinity,maxSlots:Infinity,maxConcurrentPositions:16,maxLeverage:5,maxMarginPct:.20,maxPortfolioRiskPct:.04,maxSameSide:4,
   maxRoundTripCostBps:24,minNetEvBps:2,seedNetEvBps:8,seedRiskMultiplier:.20,seedMinDirProb:.6001,seedMinDirLead:.04,minExecObs:30,minExecSideObs:20,minExecNetEvBps:2,minExecLowerBps:.5,execShrinkObs:40,minSlAtr:1,maxTpAtr:4,
-  bootstrapBatchSize:10,
+  bootstrapBatchSize:10,bootstrapCursor:0,
   bootstrapConcurrency:4,bootstrapIntervalMs:15000,bootstrapMinSpacingMs:2500,bootstrapRunning:false,bootstrapIntervalSince:0,
   wsQueue:[],wsWanted:{},wsAcked:{},wsSentAt:{},wsSubDefs:{},wsPumpTimer:0,wsWatchdog:0,wsLastData:0,wsGeneration:0,
   perpDexNames:[''],allowedPerpDex:'',excludedPerpDexNames:['xyz'],universeByDex:{},resolveRestNext:0,
@@ -1149,7 +1149,7 @@ function statsFor(h){
   if(!o.length)return{n:0,b:NaN,ll:NaN,hit:NaN,roll:NaN,delta:NaN,ciLo:NaN,ciHi:NaN};
   var bs=o.map(function(x){return brier(x.pf,x.target)}),ls=o.map(function(x){return logloss(x.pf,x.target)}),hits=o.map(function(x){return x.pf.indexOf(Math.max.apply(null,x.pf))===x.target?1:0}),recent=bs.slice(-50);
   var dif=o.map(function(x){return brier(x.pb,x.target)-brier(x.pf,x.target)}),md=metricArr(dif),sd=Math.sqrt(dif.reduce(function(s,x){return s+(x-md)*(x-md)},0)/Math.max(1,dif.length-1)),se=sd/Math.sqrt(Math.max(1,dif.length)),margin=1.96*se;
-  var net=o.filter(function(x){return x.actionable===true&&finite(x.netRet)}).map(function(x){return x.netRet});
+  var net=o.filter(function(x){return (x.actionable===true||x.shadowActionable===true)&&finite(x.netRet)}).map(function(x){return x.netRet});
   return{n:o.length,b:metricArr(bs),ll:metricArr(ls),hit:metricArr(hits),roll:metricArr(recent),delta:md,ciLo:md-margin,ciHi:md+margin,net:metricArr(net)};
 }
 function pasrVerdict(h){
@@ -1417,7 +1417,7 @@ async function portfolioBootstrap(){
   if(P.bootstrapRunning)return{done:0,assets:P.universe.length,busy:true};
   if(P.lastBootstrap&&t-P.lastBootstrap<P.bootstrapIntervalMs)return{done:0,assets:P.universe.length};
   P.lastBootstrap=t;P.bootstrapRunning=true;
-  var list=P.universe.slice().sort(function(x,y){return(P.volume[y]||0)-(P.volume[x]||0)}).slice(0,Math.max(P.bootstrapBatchSize||10,1)),done=0,trained=0,starts=0;
+  var sortedList=P.universe.slice().sort(function(x,y){return(P.volume[y]||0)-(P.volume[x]||0)}),batchSize=Math.max(P.bootstrapBatchSize||10,1),cursor=(P.bootstrapCursor||0)%Math.max(sortedList.length,1),list=[];for(var li0=0;li0<Math.min(batchSize,sortedList.length);li0++)list.push(sortedList[(cursor+li0)%sortedList.length]);P.bootstrapCursor=sortedList.length?(cursor+list.length)%sortedList.length:0;var done=0,trained=0,starts=0;
   try{
     for(var bi=0;bi<list.length;bi+=(P.bootstrapConcurrency||2)){
       if(bi>0){
