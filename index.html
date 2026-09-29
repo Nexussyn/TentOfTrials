@@ -386,7 +386,7 @@ var P={
   assets:[],universe:[],states:{},volume:{},wsSubscribed:{},
   focusCoin:'',focusH:5,
   maxAssets:Infinity,maxSlots:Infinity,maxConcurrentPositions:4,maxLeverage:5,maxMarginPct:.20,maxPortfolioRiskPct:.02,maxSameSide:Infinity,
-  maxRoundTripCostBps:24,minGlobalProfitObs:200,minAssetProfitObs:5,minGlobalModelObs:120,minAssetLiveObs:20,
+  maxRoundTripCostBps:24,minNetEvBps:3,minGlobalProfitObs:200,minAssetProfitObs:5,minGlobalModelObs:120,minAssetLiveObs:20,timeStopMultiple:2,
   bootstrapConcurrency:1,bootstrapIntervalMs:60000,bootstrapMinSpacingMs:2500,bootstrapRunning:false,bootstrapIntervalSince:0,
   wsQueue:[],wsWanted:{},wsAcked:{},wsSentAt:{},wsSubDefs:{},wsPumpTimer:0,wsWatchdog:0,wsGeneration:0,
   h:5,lastScan:0,lastMeta:0,lastBootstrap:0,bootstrapped:{},positions:{},cooldown:{},signalsRows:[],lastOpenRejects:{}
@@ -564,16 +564,15 @@ function profitBucket(store,h,dir,target){
   if(!store[key])store[key]={n:0,mean:0,m2:0,lastTs:0};
   return store[key];
 }
-function updateProfitCalibration(h,coin,dir,target,netRet){
+function updateProfitCalibration(h,coin,dir,target,netRet,silent){
   if((dir!=='LONG'&&dir!=='SHORT')||!finite(netRet)||!Number.isInteger(target)||target<0||target>2)return;
   DB.profit=DB.profit||{global:{},asset:{}};DB.profit.global=DB.profit.global||{};DB.profit.asset=DB.profit.asset||{};
   var g=profitBucket(DB.profit.global,h,dir,target),a0=(DB.profit.asset[coin]=DB.profit.asset[coin]||{}),a=profitBucket(a0,h,dir,target);
   function add(x){
-    x.n=Math.min((x.n||0)+1,5000);
-    var k=x.n<400?1/x.n:.0025,old=x.mean||0;
-    x.mean=old+k*(netRet-old);x.m2=(x.m2||0)+k*(netRet-old)*(netRet-x.mean);x.lastTs=now();
+    var prev=x.n||0,nn=Math.min(prev+1,5000),k=nn<400?1/nn:.0025,old=x.mean||0;
+    x.n=nn;x.mean=old+k*(netRet-old);x.m2=(x.m2||0)+k*(netRet-old)*(netRet-x.mean);x.lastTs=now();
   }
-  add(g);add(a);save();
+  add(g);add(a);if(!silent)save();
 }
 function profitCount(h,dir){
   var s=0,g=DB.profit&&DB.profit.global||{};
@@ -1063,13 +1062,11 @@ function subscribeNewPortfolioAssets(){
   var ws=S.hlSocket;if(!ws||ws.readyState!==1)return;
   queueSubscription({type:'allMids'});
   var list=P.universe.slice();
-  for(var i=0;i<list.length;i++){
-    var coin=list[i];
-    queueSubscription({type:'l2Book',coin:coin});
-    queueSubscription({type:'trades',coin:coin});
-    queueSubscription({type:'candle',coin:coin,interval:'1m'});
-    queueSubscription({type:'activeAssetCtx',coin:coin});
-  }
+  // Prioritize the two feeds required for immediate universe readiness; enrich only after every market has them.
+  for(var i=0;i<list.length;i++)queueSubscription({type:'l2Book',coin:list[i]});
+  for(var j=0;j<list.length;j++)queueSubscription({type:'trades',coin:list[j]});
+  for(var k=0;k<list.length;k++)queueSubscription({type:'activeAssetCtx',coin:list[k]});
+  for(var q=0;q<list.length;q++)queueSubscription({type:'candle',coin:list[q],interval:'1m'});
   pumpSubscriptions(ws);
 }
 async function restSync(){
@@ -1097,7 +1094,7 @@ async function restSync(){
   if(hlL2&&hlL2.ok&&hlL2.v&&Array.isArray(hlL2.v.levels)&&hlL2.v.levels.length>=2){a.hl.book=hlL2.v;a.hl.lastBook=t;a.feed.HL_L2='OK'}else if(!fresh(a.hl.lastBook,7000))a.feed.HL_L2='STALE';
   if(hlTrades&&hlTrades.ok&&Array.isArray(hlTrades.v)&&hlTrades.v.length){
     for(var ti=0;ti<hlTrades.v.length;ti++){var tq=hlTrades.v[ti];if(tq&&tq.side&&tq.sz!=null)a.hl.trades.push({time:+tq.time||t,side:(tq.side==='B'||tq.side==='Buy')?'B':'S',sz:+tq.sz})}
-    a.hl.trades=a.hl.trades.slice(-12000);a.hl.lastTrades=t;a.feed.HL_TRADES='OK';
+    a.hl.trades=a.hl.trades.slice(-4000);a.hl.lastTrades=t;a.feed.HL_TRADES='OK';
   }else if(!fresh(a.hl.lastTrades,12000))a.feed.HL_TRADES='STALE';
   attachAsset(focus);S.hl=a.hl;S.tape=a.tape;S.feed=a.feed;S.lastRest=t;return settled;
 }
@@ -1129,7 +1126,7 @@ function reconnectHL(){
           if(ack){P.wsAcked[ack]=t;delete P.wsWanted[ack];delete P.wsSentAt[ack];}
           pumpSubscriptions(ws);
         }else if(m.channel==='allMids'&&m.data&&m.data.mids){
-          Object.keys(m.data.mids).forEach(function(coin){var a=ensureAsset(coin),px=+m.data.mids[coin];if(finite(px)){a.hl.price=px;a.hl.lastPrice=t;a.tape.push({t:t,p:px});a.tape=a.tape.slice(-50000)}});
+          Object.keys(m.data.mids).forEach(function(coin){var a=ensureAsset(coin),px=+m.data.mids[coin];if(finite(px)){a.hl.price=px;a.hl.lastPrice=t;a.tape.push({t:t,p:px});a.tape=a.tape.slice(-12000)}});
           S.hl=ensureAsset(S.coin).hl;S.tape=ensureAsset(S.coin).tape;
         }else if(m.channel==='l2Book'&&m.data){
           var d=m.data.data||m.data,coin=d.coin||S.coin;if(Array.isArray(d.levels)&&d.levels.length>=2){var a=ensureAsset(coin);a.hl.book=d;a.hl.lastBook=t;a.feed.HL_L2='OK';if(coin===S.coin)S.hl=a.hl}
@@ -1329,6 +1326,21 @@ function dashboard(){
   $('learnState').textContent=st.n<30?'LEARNING':st.n<100?'CALIBRATING': 'ADAPTIVE';
   $('kPrice').textContent=nfmt(S.hl.price,2);$('kDQ').textContent=q+'/100';$('kMix').textContent='GLOBAL '+(m.globalSeen||0)+' live · LOCAL '+(model(S.h,'full').liveSeen||0)+' live';$('kEdge').textContent=finite(pl.edge)?((pl.edge>=0?'+':'')+(pl.edge*100).toFixed(1)+' pt'):'—';var ages=[S.hl.lastBook,S.hl.lastTrades,S.bn.lastPerp,S.bn.lastMark].filter(function(x){return x>0}).map(function(x){return Math.max(0,now()-x)/1000});$('kFresh').textContent=ages.length?Math.round(Math.max.apply(null,ages))+'s':'—';
   $('chartInfo').textContent='HL '+nfmt(S.hl.price)+' · BN '+nfmt(S.bn.price);try{renderCapital()}catch(e){} try{renderPortfolio()}catch(e){} try{renderHealth()}catch(e){} try{journal()}catch(e){} $('audit').textContent='CAPITAL PAPER = une simulation indépendante par horizon, une seule position active à la fois; sizing au risque '+S.risk+'% de l\'equity, entry/SL/TP enregistrés à t0, sizing incluant stop + commissions + slippage + spread, frais '+S.fee+' bps/side, slippage '+S.slip+' bps/side, funding exclu. Le signal privilégie le modèle appris; l’evidence manuelle reste un faible prior et le PASR est exposé progressivement puis désactivé s’il est statistiquement défavorable. PRETRAIN prix = '+((DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[S.h]&&DB.pretrain[S.coin].h[S.h].n)||0)+' labels pour '+hlabel(S.h)+'; non présenté comme OOS full. LIVE OOS = prévision gelée à t0 puis résolue au prix observé à t0+h. BASE exclut les features microstructurelles/PASR; FULL les apprend en live. PASR = feature expérimentale, verdict par différence Brier appariée + IC approximatif à 95 %. Warm-start ne réinitialise plus le live.';
+}
+function migrateV16(){
+  if(DB.engineVersion===16)return;
+  var p=portfolioState(),oldPositions=Object.keys(p.positions||{}).length;
+  // V15 allowed many tiny positions and is not comparable to the V16 portfolio construction.
+  // Preserve cash/equity and historical logs, but start the new strategy without carrying legacy inventory.
+  if(oldPositions){p.positions={};p.migration=(p.migration||[]).concat([{ts:now(),from:'V15',droppedPositions:oldPositions,reason:'V16_PORTFOLIO_RESET'}])}
+  DB.paper={};DB.engineVersion=16;
+  // Backfill the new realized-profit calibration from already-resolved shadow forecasts.
+  Object.keys(DB.obs||{}).forEach(function(key){
+    var m=key.match(/^(.*)_([0-9]+)$/);if(!m)return;
+    var coin=m[1],h=+m[2],arr=DB.obs[key]||[];
+    for(var i=0;i<arr.length;i++){var x=arr[i];if(x&&finite(x.netRet)&&Number.isInteger(x.target))updateProfitCalibration(h,coin,x.candidate==='SHORT'?'SHORT':'LONG',x.target,x.netRet,true)}
+  });
+  DB.portfolio=p;save();
 }
 function syntheticState(){
   var t=now(),base=83250;
