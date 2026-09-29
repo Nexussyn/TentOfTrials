@@ -477,7 +477,7 @@ function portfolioMark(coin){
   return{price:price,pos:pos,realized:realized,unreal:unreal,total:realized+(finite(unreal)?unreal:0)};
 }
 function bootstrapPortfolioModel(coin){
-  var h=P.h,a=ensureAsset(coin),bars=a.hl.candles.slice(-500);if(bars.length<180)return false;
+  var h=P.h,a=ensureAsset(coin),bars=a.hl.candles.slice(-5000),need=Math.min(5000,Math.max(500,h+440));if(bars.length<Math.min(need,180))return false;
   return withAsset(coin,function(){
     var bm=model(h,'base'),fm=model(h,'full'),gb=globalModel(h,'base'),gf=globalModel(h,'full');
     if((bm.seen||0)>=120&&(gb.seen||0)>=120)return true;
@@ -979,7 +979,7 @@ function subscribeNewPortfolioAssets(){
 async function restSync(){
   var t=now(),results=[];
   var jobs=[
-    {name:'HL_CANDLE',p:hl({type:'candleSnapshot',req:{coin:S.coin,interval:'1m',startTime:t-3*86400000,endTime:t}})},
+    {name:'HL_CANDLE',p:hl({type:'candleSnapshot',req:{coin:S.coin,interval:'1m',startTime:t-240*60000,endTime:t}})},
     {name:'HL_CTX',p:hl({type:'metaAndAssetCtxs'})},
     {name:'HL_L2',p:hl({type:'l2Book',coin:S.coin})},
     {name:'HL_TRADES',p:hl({type:'recentTrades',coin:S.coin})},
@@ -989,7 +989,13 @@ async function restSync(){
   var settled=await Promise.all(jobs.map(function(j){return Promise.resolve(j.p).then(function(v){return{name:j.name,ok:true,v:v}}).catch(function(e){return{name:j.name,ok:false,e:e}})}));
   var hc=settled.find(function(x){return x.name==='HL_CANDLE'}),ctx=settled.find(function(x){return x.name==='HL_CTX'}),boi=settled.find(function(x){return x.name==='BN_OI'}),bp=settled.find(function(x){return x.name==='BN_PREM'});
   if(ctx&&ctx.ok)updatePortfolioUniverse(ctx.v);
-  if(hc&&hc.ok){S.hl.candles=(hc.v||[]).map(function(q){return{t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v}}).sort(function(a,b){return a.t-b.t}).slice(-5000);S.feed.HL_CANDLE='OK'}else S.feed.HL_CANDLE='STALE';
+  if(hc&&hc.ok){
+    var recentCandles=(hc.v||[]).map(function(q){return{t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v}});
+    var candleMap={};for(var ci=0;ci<S.hl.candles.length;ci++){var oldc=S.hl.candles[ci];if(oldc&&oldc.t!=null)candleMap[oldc.t]=oldc}
+    for(var cj=0;cj<recentCandles.length;cj++){var nc=recentCandles[cj];if(nc&&nc.t!=null)candleMap[nc.t]=nc}
+    S.hl.candles=Object.values(candleMap).sort(function(a,b){return a.t-b.t}).slice(-5000);
+    if(!finite(S.hl.price)&&S.hl.candles.length)S.hl.price=S.hl.candles[S.hl.candles.length-1].c;S.feed.HL_CANDLE='OK';
+  }else S.feed.HL_CANDLE='STALE';
   if(ctx&&ctx.ok){var u=ctx.v&&ctx.v[0]&&ctx.v[0].universe||[],idx=u.findIndex(function(q){return q.name===S.coin});if(idx>=0&&ctx.v[1]&&ctx.v[1][idx]){S.hl.oi=+ctx.v[1][idx].openInterest;S.hl.funding=+ctx.v[1][idx].funding;S.hl.lastCtx=t;S.feed.HL_CTX='OK'}else S.feed.HL_CTX='STALE'}else S.feed.HL_CTX='STALE';
   if(boi&&boi.ok&&boi.v&&boi.v.openInterest){S.bn.oi=+boi.v.openInterest;S.bn.oiHist.push({t:t,v:S.bn.oi});S.bn.oiHist=S.bn.oiHist.slice(-1000)}
   if(bp&&bp.ok&&bp.v&&bp.v.lastFundingRate!=null)S.bn.funding=+bp.v.lastFundingRate;
@@ -1090,7 +1096,7 @@ async function portfolioBootstrap(){
         }
       }catch(e){}
       // Keep the aggregate REST weight comfortably below the 1200/min IP budget.
-      var estWeight=20+Math.ceil(needBars/60),spacing=Math.max(P.bootstrapMinSpacingMs,Math.ceil(estWeight*60000/900));
+      var estWeight=20+Math.ceil(needBars/60),spacing=Math.max(P.bootstrapMinSpacingMs,Math.ceil(estWeight*60000/600));
       P.bootstrapIntervalSince=now()+spacing;
     }
     for(var mi=0;mi<list.length;mi++){
@@ -1244,7 +1250,7 @@ async function boot(){
     restSync().then(function(){portfolioBootstrap().then(function(){portfolioScan()}).catch(function(){});dashboard()}).catch(function(e){diagError('REST',e);dashboard()});
     warmStart().then(function(){dashboard()}).catch(function(e){diagError('WARM_START',e);dashboard()});
     setInterval(function(){
-      if(now()-S.lastRest>15000)restSync().then(function(){return portfolioBootstrap()}).then(function(){portfolioScan()}).catch(function(e){diagError('REST_LOOP',e)});
+      if(now()-S.lastRest>30000)restSync().then(function(){return portfolioBootstrap()}).then(function(){portfolioScan()}).catch(function(e){diagError('REST_LOOP',e)});
       restSpot();
       if(!fresh(S.hl.lastBook,7000)||!fresh(S.hl.lastTrades,12000)){
         Promise.all([
