@@ -1074,32 +1074,32 @@ function subscribeNewPortfolioAssets(){
   pumpSubscriptions(ws);
 }
 async function restSync(){
-  var t=now(),settled=[];
+  var t=now(),ctx=null,focus=null;
+  try{ctx=await hl({type:'metaAndAssetCtxs'});updatePortfolioUniverse(ctx)}catch(e){ctx=null}
+  focus=P.focusCoin||P.universe[0]||'';
+  if(!focus){S.lastRest=t;return[]}
   var jobs=[
-    {name:'HL_CANDLE',p:hl({type:'candleSnapshot',req:{coin:P.focusCoin||S.coin||'BTC',interval:'1m',startTime:t-240*60000,endTime:t}})},
-    {name:'HL_CTX',p:hl({type:'metaAndAssetCtxs'})},
-    {name:'HL_L2',p:hl({type:'l2Book',coin:P.focusCoin||S.coin||'BTC'})},
-    {name:'HL_TRADES',p:hl({type:'recentTrades',coin:P.focusCoin||S.coin||'BTC'})}
+    {name:'HL_CANDLE',p:hl({type:'candleSnapshot',req:{coin:focus,interval:'1m',startTime:t-240*60000,endTime:t}})},
+    {name:'HL_L2',p:hl({type:'l2Book',coin:focus})},
+    {name:'HL_TRADES',p:hl({type:'recentTrades',coin:focus})}
   ];
-  settled=await Promise.all(jobs.map(function(j){return Promise.resolve(j.p).then(function(v){return{name:j.name,ok:true,v:v}}).catch(function(e){return{name:j.name,ok:false,e:e}})}));
-  var ctx=settled.find(function(x){return x.name==='HL_CTX'}),hc=settled.find(function(x){return x.name==='HL_CANDLE'});
-  if(ctx&&ctx.ok)updatePortfolioUniverse(ctx.v);
-  var focus=P.focusCoin||S.coin||'BTC',a=ensureAsset(focus),hlL2=settled.find(function(x){return x.name==='HL_L2'}),hlTrades=settled.find(function(x){return x.name==='HL_TRADES'});
+  var settled=await Promise.all(jobs.map(function(j){return Promise.resolve(j.p).then(function(v){return{name:j.name,ok:true,v:v}}).catch(function(e){return{name:j.name,ok:false,e:e}})}));
+  var a=ensureAsset(focus),hc=settled[0],hlL2=settled[1],hlTrades=settled[2];
   if(hc&&hc.ok){
-    var recentCandles=(hc.v||[]).map(function(q){return{t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v}});
-    var candleMap={};for(var ci=0;ci<a.hl.candles.length;ci++){var oldc=a.hl.candles[ci];if(oldc&&oldc.t!=null)candleMap[oldc.t]=oldc}
-    for(var cj=0;cj<recentCandles.length;cj++){var nc=recentCandles[cj];if(nc&&nc.t!=null)candleMap[nc.t]=nc}
-    a.hl.candles=Object.values(candleMap).sort(function(x,y){return x.t-y.t}).slice(-5000);a.feed.HL_CANDLE='OK';
-  }else a.feed.HL_CANDLE='STALE';
-  if(ctx&&ctx.ok){
-    var u=ctx.v&&ctx.v[0]&&ctx.v[0].universe||[],idx=u.findIndex(function(q){return q.name===focus}),cx=ctx.v[1]&&ctx.v[1][idx];
-    if(idx>=0&&cx){a.hl.oi=+cx.openInterest;a.hl.funding=+cx.funding;a.hl.markPx=+cx.markPx;a.hl.oraclePx=+cx.oraclePx;a.hl.dayNtlVlm=+cx.dayNtlVlm;a.hl.lastCtx=t;a.feed.HL_CTX='OK'}else a.feed.HL_CTX='STALE';
-  }else a.feed.HL_CTX='STALE';
-  if(hlL2&&hlL2.ok&&hlL2.v&&Array.isArray(hlL2.v.levels)&&hlL2.v.levels.length>=2){a.hl.book=hlL2.v;a.hl.lastBook=t;a.feed.HL_L2='OK'}else if(!fresh(a.hl.lastBook,7000))a.feed.HL_L2='STALE';
+    var recent=(hc.v||[]).map(function(q){return{t:+q.t,o:+q.o,h:+q.h,l:+q.l,c:+q.c,v:+q.v}}),map={};
+    for(var i=0;i<a.hl.candles.length;i++){var z=a.hl.candles[i];if(z&&z.t!=null)map[z.t]=z}
+    for(var j=0;j<recent.length;j++){var y=recent[j];if(y&&y.t!=null)map[y.t]=y}
+    a.hl.candles=Object.values(map).sort(function(x,y){return x.t-y.t}).slice(-5000);a.feed.HL_CANDLE='OK';
+  }
+  if(ctx&&ctx[0]&&Array.isArray(ctx[0].universe)){
+    var u=ctx[0].universe||[],ac=Array.isArray(ctx[1])?ctx[1]:[],idx=u.findIndex(function(q){return q.name===focus}),cx=ac[idx];
+    if(idx>=0&&cx){a.hl.oi=+cx.openInterest;a.hl.funding=+cx.funding;a.hl.markPx=+cx.markPx;a.hl.oraclePx=+cx.oraclePx;a.hl.dayNtlVlm=+cx.dayNtlVlm;a.hl.lastCtx=t;a.feed.HL_CTX='OK'}
+  }
+  if(hlL2&&hlL2.ok&&hlL2.v&&Array.isArray(hlL2.v.levels)&&hlL2.v.levels.length>=2){a.hl.book=hlL2.v;a.hl.lastBook=t;a.feed.HL_L2='OK'}
   if(hlTrades&&hlTrades.ok&&Array.isArray(hlTrades.v)&&hlTrades.v.length){
     for(var ti=0;ti<hlTrades.v.length;ti++){var tq=hlTrades.v[ti];if(tq&&tq.side&&tq.sz!=null)a.hl.trades.push({time:+tq.time||t,side:(tq.side==='B'||tq.side==='Buy')?'B':'S',sz:+tq.sz})}
     a.hl.trades=a.hl.trades.slice(-4000);a.hl.lastTrades=t;a.feed.HL_TRADES='OK';
-  }else if(!fresh(a.hl.lastTrades,12000))a.feed.HL_TRADES='STALE';
+  }
   attachAsset(focus);S.hl=a.hl;S.tape=a.tape;S.feed=a.feed;S.lastRest=t;return settled;
 }
 function reconnectHL(){
@@ -1375,63 +1375,37 @@ function assertSelfTest(){
 async function boot(){
   try{
     stage('BOOT');
-    S.coin=$('coin').value==='AUTO'?'BTC':$('coin').value;S.h=+$('hor').value;S.capital=+$('capital').value||1000;S.risk=+$('risk').value||.5;S.fee=+$('fee').value||0;S.slip=+$('slip').value||1.5;
-    for(var pi=0;pi<H.length;pi++)paperState(H[pi]);
-    var _pp=portfolioState();if(!finite(_pp.capital)||_pp.capital<=0)_pp.capital=S.capital;if(!finite(_pp.capitalBase)||_pp.capitalBase<=0)_pp.capitalBase=S.capital;DB.portfolio=_pp;
-    dashboard();
+    S.coin='';S.h=5;S.capital=+$('capital').value||1000;S.risk=+$('risk').value||.5;S.fee=+$('fee').value||0;S.slip=+$('slip').value||1.5;
+    migrateV16();dashboard();
     if(SELFTEST){
-      stage('SELFTEST');syntheticState();dashboard();assertSelfTest();stage('SELFTEST PASS');return;
+      stage('SELFTEST');S.coin='TEST';P.focusCoin='TEST';P.focusH=5;P.universe=['TEST'];ensureAsset('TEST');syntheticState();P.signalsRows=[{coin:'TEST',h:5,price:S.hl.price,tradeScore:1,action:'LONG'}];dashboard();assertSelfTest();stage('SELFTEST PASS');return;
     }
-    try{
-      hydratePersistent().then(function(){dashboard()}).catch(function(e){diagError('persistence',e);dashboard()});
-    }catch(e){diagError('persistence',e)}
-    dashboard();
-    stage('CONNECTING');
-    reconnectHL();reconnectBN();restSpot();
-    restSync().then(function(){portfolioBootstrap().then(function(){portfolioScan()}).catch(function(){});dashboard()}).catch(function(e){diagError('REST',e);dashboard()});
-    warmStart().then(function(){dashboard()}).catch(function(e){diagError('WARM_START',e);dashboard()});
+    try{hydratePersistent().then(function(){migrateV16();dashboard()}).catch(function(e){diagError('persistence',e);dashboard()})}catch(e){diagError('persistence',e)}
+    stage('CONNECTING');reconnectHL();
+    restSync().then(function(){return portfolioBootstrap()}).then(function(){portfolioScan();dashboard()}).catch(function(e){diagError('REST_BOOT',e);dashboard()});
     setInterval(function(){
       if(now()-S.lastRest>30000)restSync().then(function(){return portfolioBootstrap()}).then(function(){portfolioScan()}).catch(function(e){diagError('REST_LOOP',e)});
-      restSpot();
-      if(!fresh(S.hl.lastBook,7000)||!fresh(S.hl.lastTrades,12000)){
-        Promise.all([
-          !fresh(S.hl.lastBook,7000)?hl({type:'l2Book',coin:S.coin}):Promise.resolve(null),
-          !fresh(S.hl.lastTrades,12000)?hl({type:'recentTrades',coin:S.coin}):Promise.resolve(null)
-        ]).then(function(z){
-          var lb=z[0],tr=z[1],tt=now();
-          if(lb&&Array.isArray(lb.levels)&&lb.levels.length>=2){S.hl.book=lb;S.hl.lastBook=tt;S.feed.HL_L2='OK'}
-          if(Array.isArray(tr)&&tr.length){
-            for(var ri=0;ri<tr.length;ri++){var tq=tr[ri];if(tq&&tq.side&&tq.sz!=null)S.hl.trades.push({time:+tq.time||tt,side:(tq.side==='B'||tq.side==='Buy')?'B':'S',sz:+tq.sz})}
-            S.hl.trades=S.hl.trades.slice(-12000);S.hl.lastTrades=tt;S.feed.HL_TRADES='OK'
-          }
-        }).catch(function(){});
-      }
-      updatePortfolioPositions();updatePaperPositions();if(S.hlSocket&&S.hlSocket.readyState===1){if(!fresh(S.hl.lastBook,5000))try{S.hlSocket.send(JSON.stringify({method:'subscribe',subscription:{type:'l2Book',coin:S.coin}}))}catch(e){}if(!fresh(S.hl.lastTrades,10000))try{S.hlSocket.send(JSON.stringify({method:'subscribe',subscription:{type:'trades',coin:S.coin}}))}catch(e){}}resolve().catch(function(e){diagError('RESOLVE',e)});
+      updatePortfolioPositions();updatePaperPositions();
+      resolve().catch(function(e){diagError('RESOLVE',e)});
       try{dashboard()}catch(e){diagError('RENDER_LOOP',e)}
     },5000);
-    setInterval(function(){if(P.universe.length&&(!P.lastBootstrap||now()-P.lastBootstrap>=P.bootstrapIntervalMs)){portfolioBootstrap().then(function(){portfolioScan()}).catch(function(){})}},5000);
+    setInterval(function(){
+      if(P.universe.length&&(!P.lastBootstrap||now()-P.lastBootstrap>=P.bootstrapIntervalMs))portfolioBootstrap().then(function(){portfolioScan()}).catch(function(e){diagError('BOOTSTRAP_LOOP',e)});
+    },5000);
     setInterval(function(){
       if(now()-S.lastForecast>55000){
-        try{
-          forecastAllUniverse()
-          portfolioBootstrap().then(function(){portfolioScan()}).catch(function(){});
-          S.lastForecast=now();
-        }catch(e){diagError('FORECAST',e)}
+        try{forecastAllUniverse();S.lastForecast=now()}catch(e){diagError('FORECAST',e)}
       }
     },5000);
     stage('LIVE');
-  }catch(e){
-    diagError('BOOT_FATAL',e);
-    try{dashboard()}catch(_){}
-  }
+  }catch(e){diagError('BOOT_FATAL',e);try{dashboard()}catch(_){}}
 }
-$('coin').onchange=function(){S.coin=$('coin').value;location.reload()};
-$('hor').onchange=function(){S.h=+$('hor').value;dashboard()};
+
 $('capital').oninput=function(){S.capital=+$('capital').value||1000};
 $('risk').oninput=function(){S.risk=+$('risk').value||.5};
 $('fee').oninput=function(){S.fee=+$('fee').value||0};
 $('slip').oninput=function(){S.slip=+$('slip').value||0};
-$('relearn').onclick=function(){var key=S.coin;DB.pretrain[key]=undefined;H.forEach(function(h){DB.models[S.coin+'_'+h]=undefined;DB.models['__GLOBAL___'+h]=undefined});save();warmStart().then(function(){dashboard()}).catch(function(e){diagError('RELEARN',e)})};
+$('relearn').onclick=function(){warmStart().then(function(){dashboard()}).catch(function(e){diagError('BOOTSTRAP_MANUAL',e)})};
 boot();
 </script>
 </body>
