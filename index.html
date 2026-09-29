@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Crypto Direction Engine — V16.4.4 CRYPTO-ONLY UNIVERSE</title>
+<title>Crypto Direction Engine — V16.4.5 CRYPTO-ONLY UNIVERSE</title>
 <style>
 :root{--bg:#061016;--p:#0c1a22;--p2:#09161d;--l:#243843;--t:#edf4f7;--m:#8ea3ad;--u:#43d19d;--d:#ff7082;--n:#f0bf55;--c:#67d7ef}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 15% 0,#122a32,#061016 42%,#050b0f);color:var(--t);font:14px/1.4 system-ui,-apple-system,Segoe UI,sans-serif}
@@ -32,7 +32,7 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
 <body>
 <header class="top">
   <div>
-    <div class="brand">CRYPTO DIRECTION ENGINE · V16.4.4 CRYPTO-ONLY UNIVERSE</div>
+    <div class="brand">CRYPTO DIRECTION ENGINE · V16.4.5 CRYPTO-ONLY UNIVERSE</div>
     <div class="tag">Hyperliquid natif · univers crypto perpétuel primaire uniquement · HIP-3/XYZ exclus · sélection cross-sectionnelle · apprentissage OOS global · aucune exécution réelle</div>
   </div>
   <div class="ctrl">
@@ -388,10 +388,10 @@ var P={
   maxAssets:Infinity,maxSlots:Infinity,maxConcurrentPositions:16,maxLeverage:5,maxMarginPct:.20,maxPortfolioRiskPct:.04,maxSameSide:4,
   maxRoundTripCostBps:24,minNetEvBps:2,seedNetEvBps:8,seedRiskMultiplier:.20,seedMinDirProb:.6001,seedMinDirLead:.04,minExecObs:30,minExecSideObs:20,minExecNetEvBps:2,minExecLowerBps:.5,execShrinkObs:40,minSlAtr:1,maxTpAtr:4,
   bootstrapBatchSize:10,bootstrapCursor:0,
-  bootstrapConcurrency:4,bootstrapIntervalMs:15000,bootstrapMinSpacingMs:2500,bootstrapRunning:false,bootstrapIntervalSince:0,
+  bootstrapConcurrency:4,bootstrapIntervalMs:20000,bootstrapMinSpacingMs:1000,bootstrapRunning:false,bootstrapIntervalSince:0,
   wsQueue:[],wsWanted:{},wsAcked:{},wsSentAt:{},wsSubDefs:{},wsPumpTimer:0,wsWatchdog:0,wsLastData:0,wsGeneration:0,
   perpDexNames:[''],allowedPerpDex:'',excludedPerpDexNames:['xyz'],universeByDex:{},resolveRestNext:0,
-  h:5,lastScan:0,lastMeta:0,lastBootstrap:0,bootstrapped:{},positions:{},cooldown:{},signalsRows:[],lastOpenRejects:{},microAssets:{},microLimit:25,bboAssets:{},bboLimit:100,lastMicroRefresh:0,bboReady:0,priceReady:0,microReady:0,wsState:'INIT',wsError:'',wsReconnects:0
+  h:5,lastScan:0,lastMeta:0,lastBootstrap:0,bootstrapped:{},positions:{},cooldown:{},signalsRows:[],lastOpenRejects:{},microAssets:{},microLimit:1000,bboAssets:{},bboLimit:1000,lastMicroRefresh:0,bboReady:0,priceReady:0,microReady:0,wsSubBatchSize:12,wsSubSpacingMs:100,wsState:'INIT',wsError:'',wsReconnects:0
 };
 function isCryptoUniverseCoin(coin){
   var s=String(coin||'').trim();
@@ -442,7 +442,7 @@ function portfolioRiskOpen(p){
 function portfolioOpen(coin,h,f,pl){
   var reject=function(reason){P.lastOpenRejects[coin]=reason;return false},p=portfolioState(),ks=Object.keys(p.positions||{}),t=now(),a=ensureAsset(coin);
   if(!marketPriceConsistent(a,a.hl.book,a.hl.bbo))return reject('BOOK_PRICE_MISMATCH');
-  if(!fresh(a.hl.lastBbo,7000))return reject('BBO_STALE');
+  if(!(fresh(a.hl.lastBbo,7000)||fresh(a.hl.lastBook,7000)))return reject('TOP_OF_BOOK_STALE');
   var seedMode=pl&&pl.mode==='SEED';
   if(!seedMode&&(!fresh(a.hl.lastBook,7000)||!fresh(a.hl.lastTrades,12000)))return reject('MICROSTRUCTURE_REQUIRED');
   if(a.dex&&a.dex!=='')return reject('DEX_SHADOW_ONLY');
@@ -859,7 +859,7 @@ function orderPlan(h,f,m){
   var shadowEligible=(dir==='LONG'||dir==='SHORT')&&finite(entry)&&finite(a)&&finite(costBps)&&costBps<=P.maxRoundTripCostBps;
   var gateReasons=[];
   if(!finite(entry)||!finite(a)||!finite(sl)||!finite(tp)||!finite(rr))gateReasons.push('LIVE_DATA');
-  if(!fresh(S.hl.lastBbo,7000))gateReasons.push('BBO_REQUIRED');
+  if(!(fresh(S.hl.lastBbo,7000)||fresh(S.hl.lastBook,7000)))gateReasons.push('TOP_OF_BOOK_REQUIRED');
   if(!seedMode&&(!fresh(S.hl.lastBook,7000)||!fresh(S.hl.lastTrades,12000)))gateReasons.push('MICROSTRUCTURE_REQUIRED');
   if(seedMode&&q<P.minSeedDQ)gateReasons.push('SEED_DQ<'+P.minSeedDQ);
   if(!seedMode&&q<70)gateReasons.push('DQ<70');
@@ -1273,14 +1273,17 @@ function pumpSubscriptions(ws){
   var step=function(){
     P.wsPumpTimer=0;
     if(!ws||ws!==S.hlSocket||ws.readyState!==1)return;
-    if(P.wsQueue.length){
+    var budget=Math.min(P.wsSubBatchSize||12,P.wsQueue.length);
+    for(var i=0;i<budget;i++){
       var sub=P.wsQueue.shift(),k=subKey(sub);
       try{
         ws.send(JSON.stringify({method:'subscribe',subscription:sub}));
         P.wsSentAt[k]=now();
-      }catch(e){delete P.wsWanted[k];delete P.wsSubDefs[k];}
-      P.wsPumpTimer=setTimeout(step,60);
+      }catch(e){
+        delete P.wsWanted[k];delete P.wsSubDefs[k];delete P.wsSentAt[k];
+      }
     }
+    if(P.wsQueue.length)P.wsPumpTimer=setTimeout(step,P.wsSubSpacingMs||100);
   };
   step();
 }
@@ -1296,12 +1299,13 @@ function refreshMicroSubscriptions(force){
   var ws=S.hlSocket;if(!ws||ws.readyState!==1)return;
   var t=now();if(!force&&t-P.lastMicroRefresh<30000)return;
   P.lastMicroRefresh=t;
-  var bboDesired=rankedTargetSet(P.bboLimit||100),microDesired=rankedTargetSet(P.microLimit||25);
+  var bboDesired=rankedTargetSet(P.bboLimit||1000),microDesired=rankedTargetSet(P.microLimit||1000);
   P.bboAssets=bboDesired;P.microAssets=microDesired;
   Object.keys(bboDesired).forEach(function(coin){queueSubscription({type:'bbo',coin:coin})});
   Object.keys(microDesired).forEach(function(coin){
     queueSubscription({type:'l2Book',coin:coin});
     queueSubscription({type:'trades',coin:coin});
+    queueSubscription({type:'activeAssetCtx',coin:coin});
   });
   pumpSubscriptions(ws);
 }
@@ -1531,7 +1535,7 @@ function renderCapital(){
   try{
     var p=portfolioState(),a=portfolioAudit(),all=0;for(var hi=0;hi<H.length;hi++)all+=globalStatsFor(H[hi]).n;
     var auditCls=a.ok?'up':'down',auditTxt=(a.ok?'RECONCILE OK':'RECONCILE ERROR')+' · écart '+a.delta.toFixed(6)+' USDC';
-    $('capitalCards').innerHTML='<div class="capitalBox" style="grid-column:1/-1"><div class="title"><b>V16.4.4 · CAPITAL RÉEL-ÉQUIVALENT · '+P.universe.length+' ACTIFS</b><span class="badge '+auditCls+'">'+auditTxt+'</span></div><b class="'+(p.capital>=p.capitalBase?'up':'down')+'">'+nfmt(p.capital,2)+' USDC</b><div class="capitalSub">Départ '+nfmt(p.capitalBase,2)+' · réalisé net '+nfmt(p.realizedNet,2)+' · DD '+(p.maxDD*100).toFixed(2)+'% · frais '+nfmt(p.fees,2)+' · trades '+p.trades+' · positions '+Object.keys(p.positions||{}).length+'/'+P.maxConcurrentPositions+'</div></div>'+
+    $('capitalCards').innerHTML='<div class="capitalBox" style="grid-column:1/-1"><div class="title"><b>V16.4.5 · CAPITAL RÉEL-ÉQUIVALENT · '+P.universe.length+' ACTIFS</b><span class="badge '+auditCls+'">'+auditTxt+'</span></div><b class="'+(p.capital>=p.capitalBase?'up':'down')+'">'+nfmt(p.capital,2)+' USDC</b><div class="capitalSub">Départ '+nfmt(p.capitalBase,2)+' · réalisé net '+nfmt(p.realizedNet,2)+' · DD '+(p.maxDD*100).toFixed(2)+'% · frais '+nfmt(p.fees,2)+' · trades '+p.trades+' · positions '+Object.keys(p.positions||{}).length+'/'+P.maxConcurrentPositions+'</div></div>'+
       H.map(function(h){var s=globalStatsFor(h);return'<div class="capitalBox"><div class="title"><b>OOS '+hlabel(h)+'</b><span class="badge">'+s.n+' observations</span></div><b>'+ (finite(s.net)?(s.net*10000).toFixed(2)+' bps':'—') +'</b><div class="capitalSub">Brier '+nfmt(s.b,4)+' · Hit '+pct(s.hit,1)+' · calibration profit L '+profitCount(h,'LONG')+' / S '+profitCount(h,'SHORT')+'</div></div>'}).join('');
   }catch(e){$('capitalCards').innerHTML='<div class="note">Performance indisponible temporairement : '+String(e.message||e)+'</div>';}
 }
@@ -1593,7 +1597,7 @@ function dashboard(){
   var ages=[S.hl.lastBook,S.hl.lastTrades,S.hl.lastCtx].filter(function(x){return x>0}).map(function(x){return Math.max(0,now()-x)/1000});$('kFresh').textContent=ages.length?Math.round(Math.max.apply(null,ages))+'s':'—';
   $('chartInfo').textContent='HL '+nfmt(S.hl.price)+' · focus dynamique '+P.focusCoin;
   try{renderCapital()}catch(e){}try{renderPortfolio()}catch(e){}try{renderHealth()}catch(e){}try{journal()}catch(e){}
-  $('audit').textContent='V16.4.4 = univers crypto-only et comptabilité propre. Seul le perpétuel natif Hyperliquid (DEX "") est admis; les DEX HIP-3, dont XYZ, sont exclus dès la découverte, des flux WS et du portefeuille. Le changement d’univers force un nouvel epoch de calibration;  Le capital V15/V16 précédent est archivé et exclu du nouveau rendement; le modèle repart de zéro sur les données de prix puis apprend uniquement sur les observations live OOS valides. Chaque marché est évalué sur les horizons '+TRADE_H.join('/')+' min, puis le meilleur horizon par actif est comparé aux autres actifs. Les shadow forecasts OOS sont créés même lorsque NO TRADE est affiché; à résolution, leur rendement net après frais, slippage et spread alimente la calibration globale et locale. Aucune donnée Binance n’est nécessaire à la décision. Les nouvelles positions sont limitées aux meilleures opportunités; la phase SEED est strictement shadow-only : elle ne mobilise aucun capital; elle collecte les résultats OOS de la politique TP/SL avant autorisation de FULL, tandis que le portefeuille peut utiliser jusqu’à 8 positions dans le budget de risque agrégé; un time-stop empêche une position de monopoliser le capital. Rentabilité non présumée : elle doit être démontrée par le rendement net OOS.';
+  $('audit').textContent='V16.4.5 = univers crypto-only et comptabilité propre. Seul le perpétuel natif Hyperliquid (DEX "") est admis; les DEX HIP-3, dont XYZ, sont exclus dès la découverte, des flux WS et du portefeuille. Le changement d’univers force un nouvel epoch de calibration;  Le capital V15/V16 précédent est archivé et exclu du nouveau rendement; le modèle repart de zéro sur les données de prix puis apprend uniquement sur les observations live OOS valides. Chaque marché est évalué sur les horizons '+TRADE_H.join('/')+' min, puis le meilleur horizon par actif est comparé aux autres actifs. Les shadow forecasts OOS sont créés même lorsque NO TRADE est affiché; à résolution, leur rendement net après frais, slippage et spread alimente la calibration globale et locale. Aucune donnée Binance n’est nécessaire à la décision. Les nouvelles positions sont limitées aux meilleures opportunités; la phase SEED est strictement shadow-only : elle ne mobilise aucun capital; elle collecte les résultats OOS de la politique TP/SL avant autorisation de FULL, tandis que le portefeuille peut utiliser jusqu’à 8 positions dans le budget de risque agrégé; un time-stop empêche une position de monopoliser le capital. Rentabilité non présumée : elle doit être démontrée par le rendement net OOS.';
 }
 function migrateV16(){
   if(DB.accountingEpoch===16.44)return;
@@ -1601,7 +1605,7 @@ function migrateV16(){
   DB.legacyV15=DB.legacyV15||{portfolio:oldP,profit:DB.profit||{},obs:DB.obs||{}};
   DB.legacyV16=DB.legacyV16||{portfolio:oldP,profit:DB.profit||{},exec:DB.exec||{},obs:DB.obs||{}};
   DB.legacyV162=DB.legacyV162||{portfolio:oldP,profit:DB.profit||{},exec:DB.exec||{},obs:DB.obs||{}};
-  // V16.4.4 démarre un nouvel epoch propre : les anciens portefeuille et calibrations de politique sont archivés et exclus.
+  // V16.4.5 démarre un nouvel epoch propre : les anciens portefeuille et calibrations de politique sont archivés et exclus.
   DB.portfolio={capitalBase:S.capital,capital:S.capital,peak:S.capital,maxDD:0,realizedNet:0,fees:0,wins:0,losses:0,trades:0,positions:{},log:[],epoch:16.44,startedAt:now()};
   DB.profit={global:{},asset:{}};
   DB.exec={global:{},asset:{}};
