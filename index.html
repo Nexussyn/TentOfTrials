@@ -330,29 +330,48 @@ function save(){
 }
 window.addEventListener('pagehide',function(){try{clearTimeout(saveTimer);flushSave()}catch(e){}});
 window.addEventListener('beforeunload',function(){try{clearTimeout(saveTimer);flushSave()}catch(e){}});
-async function hydratePersistent(){
-  if(!window.indexedDB){save();return}
-  await new Promise(function(resolve){
-    var req;
-    try{req=indexedDB.open(IDB_NAME,IDB_VERSION)}catch(e){resolve();return}
-    req.onupgradeneeded=function(){var db=req.result;if(!db.objectStoreNames.contains(IDB_STORE))db.createObjectStore(IDB_STORE,{keyPath:'id'})};
+function hydratePersistent(){
+  if(!window.indexedDB){save();return Promise.resolve('NO_IDB')}
+  return new Promise(function(resolve){
+    var done=false,req,timer=0;
+    function finish(tag){
+      if(done)return;
+      done=true;
+      clearTimeout(timer);
+      try{if(req&&req.result)req.result.close()}catch(_){}
+      resolve(tag||'OK');
+    }
+    timer=setTimeout(function(){finish('TIMEOUT')},900);
+    try{req=indexedDB.open(IDB_NAME,IDB_VERSION)}catch(e){finish('OPEN_ERROR');return}
+    req.onupgradeneeded=function(){
+      try{
+        var db=req.result;
+        if(!db.objectStoreNames.contains(IDB_STORE))db.createObjectStore(IDB_STORE,{keyPath:'id'});
+      }catch(e){}
+    };
+    req.onblocked=function(){finish('BLOCKED')};
+    req.onerror=function(){finish('OPEN_ERROR')};
     req.onsuccess=function(){
       var db=req.result;
       try{
         var tx=db.transaction(IDB_STORE,'readonly'),gr=tx.objectStore(IDB_STORE).get('state');
         gr.onsuccess=function(){
+          if(done)return;
           var rec=gr.result;
-          if(rec&&rec.db&&(rec.updatedAt||0)>(DB.updatedAt||0))DB=normalizeDB(rec.db);
-          else idbPutSnapshot();
-          try{db.close()}catch(e){}
-          resolve();
+          if(rec&&rec.db){
+            DB=mergeDB(DB,rec.db);
+            save();
+          }else{
+            idbPutSnapshot();
+          }
+          finish('OK');
         };
-        gr.onerror=function(){try{db.close()}catch(e){}resolve()};
-      }catch(e){try{db.close()}catch(_){}resolve()}
+        gr.onerror=function(){finish('READ_ERROR')};
+        tx.onabort=function(){finish('TX_ABORT')};
+        tx.onerror=function(){finish('TX_ERROR')};
+      }catch(e){finish('TX_ERROR')}
     };
-    req.onerror=function(){resolve()};
   });
-  save();
 }
 var S={
   coin:'BTC',h:5,capital:1000,risk:.5,fee:4.5,slip:1.5,lastForecast:0,lastRender:0,lastRest:0,
@@ -1185,7 +1204,9 @@ async function boot(){
     if(SELFTEST){
       stage('SELFTEST');syntheticState();dashboard();assertSelfTest();stage('SELFTEST PASS');return;
     }
-    try{await withTimeout(hydratePersistent(),1200,'persistence hydration')}catch(e){diagError('persistence',e)}
+    try{
+      hydratePersistent().then(function(){dashboard()}).catch(function(e){diagError('persistence',e);dashboard()});
+    }catch(e){diagError('persistence',e)}
     dashboard();
     stage('CONNECTING');
     reconnectHL();reconnectBN();restSpot();
