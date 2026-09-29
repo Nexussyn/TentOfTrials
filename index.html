@@ -209,7 +209,7 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
 <div class="panel">
   <div class="title"><h3>Journal OOS</h3><span class="tiny">PRETRAIN séparé du LIVE OOS · aucune métrique inventée</span></div>
   <table class="table">
-    <thead><tr><th>Horizon</th><th>Pretrain</th><th>Live OOS</th><th>Capital</th><th>Trades</th><th>Brier</th><th>Log loss</th><th>Hit</th><th>Δ PASR</th><th>État</th></tr></thead>
+    <thead><tr><th>Horizon</th><th>Pretrain</th><th>Live OOS</th><th>Capital</th><th>Trades</th><th>Brier</th><th>Log loss</th><th>Hit</th><th>Net OOS</th><th>Δ PASR</th><th>État</th></tr></thead>
     <tbody id="journal"></tbody>
   </table>
 </div>
@@ -652,7 +652,7 @@ function orderPlan(h,f,m){
   var d=f.depth||{},entry=dir==='LONG'?d.ask:d.bid,a=finite(f.atr)?f.atr:(finite(S.hl.price)?S.hl.price*.0025:NaN),q=dataQuality(f),costBps=roundTripCostBps(f),pair=bestPair(h,dir,pd,po,entry,a,f),riskCash=S.capital*S.risk/100;
   var riskDist=a*pair.sl,sl=dir==='LONG'?entry-riskDist:entry+riskDist,costPerUnit=(finite(entry)&&finite(sl)?executionCostPerUnit(entry,sl,spreadBps(f)):NaN),sz=riskDist>0&&finite(costPerUnit)?riskCash/(riskDist+costPerUnit):NaN;
   var feeR=entry&&a&&pair.sl&&finite(costBps)?entry*(costBps/10000)/(a*pair.sl):NaN,evR=(pd*pair.tp)-(po*pair.sl)-feeR,evRet=entry&&a&&finite(costBps)?(pd*(a*pair.tp/entry)-po*(a*pair.sl/entry)-costBps/10000):NaN,edge=pd-po;
-  var es=m.score,align=finite(es)?(dir==='LONG'?es: -es):NaN, strongEvidence=finite(align)&&align>=.12;
+  var es=m.score,align=finite(es)?(dir==='LONG'?es: -es):NaN, strongEvidence=finite(align)&&align>=.08;
   var gateReasons=[];
   if(!finite(entry)||!finite(a)||!finite(f.l2))gateReasons.push('L2/ATR');
   if(q<75)gateReasons.push('DQ<75');
@@ -714,8 +714,8 @@ function paperState(h){
   return p;
 }
 function paperStats(h){
-  var p=paperState(h),ret=p.capital/p.capitalBase-1,dd=p.peak>0?1-p.capital/p.peak:0;
-  return{capital:p.capital,capitalBase:p.capitalBase,returnPct:ret,maxDD:Math.max(p.maxDD||0,dd||0),trades:p.trades||0,wins:p.wins||0,losses:p.losses||0,fees:p.fees||0,winRate:p.trades?(p.wins||0)/p.trades:NaN};
+  var p=paperState(h),ret=p.capital/p.capitalBase-1,dd=p.peak>0?1-p.capital/p.peak:0,logs=(p.log||[]).filter(function(x){return finite(x.net)}),avgNet=logs.length?logs.reduce(function(a,x){return a+x.net},0)/logs.length:NaN;
+  return{capital:p.capital,capitalBase:p.capitalBase,returnPct:ret,maxDD:Math.max(p.maxDD||0,dd||0),trades:p.trades||0,wins:p.wins||0,losses:p.losses||0,fees:p.fees||0,avgNet:avgNet,winRate:p.trades?(p.wins||0)/p.trades:NaN};
 }
 function paperPendingExists(h){
   var key=S.coin+'_'+h,a=DB.pending[key]||[];
@@ -735,19 +735,21 @@ function markPaperResolved(h,position,exit,reason,exitTs){
 }
 function settlePaperPosition(h,position,exit,reason,exitTs){
   if(!position||!finite(exit)||position.closed)return false;
-  var ledger=paperState(h),feePerSide=position.paperFee!=null?position.paperFee:S.fee;
+  var ledger=paperState(h),feePerSide=position.paperFee!=null?position.paperFee:S.fee,slipPerSide=position.paperSlip!=null?position.paperSlip:S.slip;
   var dir=position.direction==='LONG'?1:-1;
   var gross=position.size*(exit-position.entry)*dir;
   var fees=(Math.abs(position.size*position.entry)+Math.abs(position.size*exit))*(feePerSide/10000);
-  var net=gross-fees;
+  var slippage=(Math.abs(position.size*position.entry)+Math.abs(position.size*exit))*(slipPerSide/10000);
+  var spreadCost=Math.abs(position.size*position.entry)*(finite(position.spreadBps)?position.spreadBps:0)/10000;
+  var net=gross-fees-slippage-spreadCost;
   ledger.capital+=net;
   ledger.peak=Math.max(ledger.peak,ledger.capital);
   var dd=ledger.peak>0?1-ledger.capital/ledger.peak:0;
   ledger.maxDD=Math.max(ledger.maxDD,dd);
   ledger.trades++;
-  ledger.fees+=fees;
+  ledger.fees+=fees+slippage+spreadCost;
   if(net>=0)ledger.wins++;else ledger.losses++;
-  ledger.log.push({ts:position.ts,exitTs:exitTs||now(),direction:position.direction,entry:position.entry,exit:exit,sl:position.sl,tp:position.tp,size:position.size,gross:gross,fees:fees,net:net,reason:reason});
+  ledger.log.push({ts:position.ts,exitTs:exitTs||now(),direction:position.direction,entry:position.entry,exit:exit,sl:position.sl,tp:position.tp,size:position.size,gross:gross,fees:fees,slippage:slippage,spreadCost:spreadCost,net:net,reason:reason});
   ledger.log=ledger.log.slice(-500);
   position.closed=true;
   position.exit=exit;
@@ -795,7 +797,8 @@ function recordForecast(h,f,m,pl){
     pBase:m.base.p.slice(),pFull:m.full.p.slice(),vBase:m.base.v.slice(),vFull:m.full.v.slice(),candidate:pl.candidate,entry:finite(pl.entry)?pl.entry:S.hl.price,
     direction:pl.direction,dir:pl.direction,atr:f.atr,pair:pl.pair||null,sl:pl.sl,tp:pl.tp,rr:pl.rr,paper:false};
   if(actionable){
-    var riskDist=Math.abs(pl.entry-pl.sl),riskCash=pstate.capital*(rec.paperRisk)/100,feePerUnit=(finite(pl.entry)&&finite(pl.sl)?(Math.abs(pl.entry)+Math.abs(pl.sl))*(rec.paperFee/10000):NaN),sz=riskDist>0&&finite(feePerUnit)?riskCash/(riskDist+feePerUnit):NaN;
+    var riskDist=Math.abs(pl.entry-pl.sl),riskCash=pstate.capital*(rec.paperRisk)/100;
+    var feePerUnit=(finite(pl.entry)&&finite(pl.sl)?(Math.abs(pl.entry)+Math.abs(pl.sl))*(rec.paperFee/10000)+(Math.abs(pl.entry)+Math.abs(pl.sl))*(rec.paperSlip/10000)+Math.abs(pl.entry)*(finite(rec.spreadBps)?rec.spreadBps:0)/10000:NaN),sz=riskDist>0&&finite(feePerUnit)?riskCash/(riskDist+feePerUnit):NaN;
     if(finite(sz)&&sz>0){
       rec.paper=true;rec.size=sz;
       pstate.position={ts:rec.ts,direction:rec.direction,entry:rec.entry,sl:rec.sl,tp:rec.tp,size:sz,paperFee:rec.paperFee,paperSlip:rec.paperSlip,spreadBps:rec.spreadBps,lastTs:rec.ts,closed:false};
@@ -1126,7 +1129,7 @@ function renderHealth(){
 function journal(){
   $('journal').innerHTML=H.map(function(h){
     var s=statsFor(h),pp=paperStats(h),pre=(DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[h]&&DB.pretrain[S.coin].h[h].n)||0,ver=pasrVerdict(h);
-    return'<tr><td>'+hlabel(h)+'</td><td>'+pre+'</td><td>'+s.n+'</td><td>'+nfmt(pp.capital,2)+'</td><td>'+pp.trades+'</td><td>'+nfmt(s.b,4)+'</td><td>'+nfmt(s.ll,4)+'</td><td>'+pct(s.hit,1)+'</td><td>'+nfmt(s.delta,4)+'</td><td>'+ver+'</td></tr>';
+    return'<tr><td>'+hlabel(h)+'</td><td>'+pre+'</td><td>'+s.n+'</td><td>'+nfmt(pp.capital,2)+'</td><td>'+pp.trades+'</td><td>'+nfmt(s.b,4)+'</td><td>'+nfmt(s.ll,4)+'</td><td>'+pct(s.hit,1)+'</td><td>'+(finite(s.net)?(s.net*10000).toFixed(2)+' bps':'—')+'</td><td>'+nfmt(s.delta,4)+'</td><td>'+ver+'</td></tr>';
   }).join('');
 }
 function draw(){
@@ -1148,7 +1151,7 @@ function dashboard(){
   $('act').textContent=dir==='LONG'?'BUY':dir==='SHORT'?'SELL':'NO TRADE';$('ord').textContent=dir==='NO TRADE'?'ABSTAIN':'READY';
   $('entry').textContent=nfmt(pl.entry);$('sl').textContent=nfmt(pl.sl);$('tp').textContent=nfmt(pl.tp);$('rr').textContent=finite(pl.rr)?'1:'+pl.rr.toFixed(2):'—';$('size').textContent=finite(pl.size)?pl.size.toFixed(5):'—';
   $('whyOrder').textContent=pl.reason;$('gateInfo').textContent='Candidat '+pl.candidate+' · prob '+(pl.pd*100).toFixed(1)+'% · edge '+(pl.edge*100).toFixed(1)+' pts · EV '+(finite(pl.ev)?(pl.ev*10000).toFixed(2)+' bps':'—')+' · TP '+(pl.pair?pl.pair.tp:'—')+' ATR · SL '+(pl.pair?pl.pair.sl:'—')+' ATR · evidence '+(finite(pl.evidence)?pl.evidence.toFixed(3):'—')+' · poids evidence '+Math.round(m.evidenceWeight*100)+'%';$('headline').textContent=dir==='NO TRADE'?'candidat '+pl.candidate+' mais portail fermé':'plan '+(dir==='LONG'?'acheteur':'vendeur')+' généré';
-  $('invalidate').textContent='Invalidation : DQ < 75, probabilité directionnelle < 55 %, écart direction/opposé < 8 pts, L2 absent/stale ou EV ≤ 0.';
+  $('invalidate').textContent='Invalidation : DQ < 75, probabilité directionnelle < 50 %, edge < 3 pts, évidence < 0,08, coût > 12 bps ou EV < 2 bps.';
   renderEvidence(f,m);renderBook(f);
   $('oi').textContent=nfmt(S.hl.oi,0);var old=S.hl.oiHist.filter(function(q){return q.t<=now()-5*60000}).slice(-1)[0];$('doi').textContent=old&&finite(S.hl.oi)?pct(S.hl.oi/old.v-1):'—';
   $('fund').textContent=pct(S.hl.funding,4);$('basis').textContent=finite(S.hl.price)&&finite(S.bn.price)?((S.hl.price/S.bn.price-1)*10000).toFixed(1)+' bps':'—';
