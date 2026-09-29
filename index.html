@@ -390,12 +390,12 @@ var P={
   bootstrapConcurrency:1,bootstrapIntervalMs:60000,bootstrapMinSpacingMs:2500,bootstrapRunning:false,bootstrapIntervalSince:0,
   wsQueue:[],wsWanted:{},wsAcked:{},wsSentAt:{},wsSubDefs:{},wsPumpTimer:0,wsWatchdog:0,wsGeneration:0,
   perpDexNames:[''],universeByDex:{},resolveRestNext:0,
-  h:5,lastScan:0,lastMeta:0,lastBootstrap:0,bootstrapped:{},positions:{},cooldown:{},signalsRows:[],lastOpenRejects:{}
+  h:5,lastScan:0,lastMeta:0,lastBootstrap:0,bootstrapped:{},positions:{},cooldown:{},signalsRows:[],lastOpenRejects:{},microAssets:{},microLimit:40,lastMicroRefresh:0,wsState:'INIT',wsError:'',wsReconnects:0
 };
 function newAssetState(){
   return{
     maxLeverage:NaN,szDecimals:NaN,dex:'',onlyIsolated:false,marginMode:'cross',
-    hl:{price:NaN,markPx:NaN,oraclePx:NaN,book:null,oi:NaN,funding:NaN,dayNtlVlm:NaN,candles:[],trades:[],oiHist:[],lastPrice:0,lastBook:0,lastTrades:0,lastCtx:0},
+    hl:{price:NaN,markPx:NaN,oraclePx:NaN,book:null,bbo:null,oi:NaN,funding:NaN,dayNtlVlm:NaN,candles:[],trades:[],oiHist:[],lastPrice:0,lastBook:0,lastBbo:0,lastTrades:0,lastCtx:0},
     bn:{price:NaN,oi:NaN,funding:NaN,spot:[],perp:[],liq:[],oiHist:[],lastMark:0,lastSpot:0,lastPerp:0,lastLiq:0,lastRest:0},
     tape:[],feed:{HL_WS:'INIT',HL_L2:'INIT',HL_TRADES:'INIT',HL_CANDLE:'INIT',HL_CTX:'INIT',BN_WS:'INIT',BN_REST:'INIT',BN_SPOT:'INIT'}
   };
@@ -429,7 +429,9 @@ function portfolioRiskOpen(p){
 }
 function portfolioOpen(coin,h,f,pl){
   var reject=function(reason){P.lastOpenRejects[coin]=reason;return false},p=portfolioState(),ks=Object.keys(p.positions||{}),t=now(),a=ensureAsset(coin);
-  if(!marketPriceConsistent(a,a.hl.book))return reject('BOOK_PRICE_MISMATCH');
+  if(!marketPriceConsistent(a,a.hl.book,a.hl.bbo))return reject('BOOK_PRICE_MISMATCH');
+  if(!fresh(a.hl.lastBbo,7000))return reject('BBO_STALE');
+  if(!fresh(a.hl.lastBook,7000)||!fresh(a.hl.lastTrades,12000))return reject('MICROSTRUCTURE_REQUIRED');
   if(a.dex&&a.dex!=='')return reject('DEX_SHADOW_ONLY');
   if(ks.length>=P.maxConcurrentPositions)return reject('POSITION_CAP');
   if(p.positions[coin])return reject('ALREADY_OPEN');
@@ -462,11 +464,9 @@ function portfolioSettle(coin,exit,reason,ts){
   p.log=p.log.slice(-1000);delete p.positions[coin];P.cooldown[coin]=now()+60000;DB.portfolio=p;save();return true;
 }
 function executableExitPrice(coin,dir,fallback){
-  var a=ensureAsset(coin);
-  if(marketPriceConsistent(a,a.hl.book)&&fresh(a.hl.lastBook,7000)){
-    var d=depth(a.hl.book);
-    return dir==='LONG'?d.bid:d.ask;
-  }
+  var a=ensureAsset(coin),d=depth(a.hl.book);
+  if(!finite(d.bid)&&a.hl.bbo)d=bboDepth(a.hl.bbo);
+  if(marketPriceConsistent(a,a.hl.book,a.hl.bbo)&&fresh(a.hl.lastBbo,7000)&&finite(d.bid)&&finite(d.ask))return dir==='LONG'?d.bid:d.ask;
   return NaN;
 }
 function updatePortfolioPositions(){
@@ -494,8 +494,8 @@ function portfolioRealizedByCoin(p,coin){
 }
 function portfolioMark(coin){
   var a=ensureAsset(coin),mark=finite(a.hl.price)?a.hl.price:NaN,pos=portfolioState().positions&&portfolioState().positions[coin],unreal=NaN;
-  if(pos&&marketPriceConsistent(a,a.hl.book)&&fresh(a.hl.lastBook,7000)){
-    var dir=pos.direction==='LONG'?1:-1,d=depth(a.hl.book),price=dir>0?d.bid:d.ask,fee=pos.paperFee!=null?pos.paperFee:S.fee;
+  if(pos&&marketPriceConsistent(a,a.hl.book,a.hl.bbo)&&fresh(a.hl.lastBbo,7000)){
+    var dir=pos.direction==='LONG'?1:-1,d=depth(a.hl.book);if(!finite(d.bid)&&a.hl.bbo)d=bboDepth(a.hl.bbo);var price=dir>0?d.bid:d.ask,fee=pos.paperFee!=null?pos.paperFee:S.fee;
     var gross=pos.size*(price-pos.entry)*dir;
     var slip=pos.paperSlip!=null?pos.paperSlip:S.slip,fees=(Math.abs(pos.size*pos.entry)+Math.abs(pos.size*price))*(fee/10000),slippage=(Math.abs(pos.size*pos.entry)+Math.abs(pos.size*price))*(slip/10000);
     unreal=gross-fees-slippage;
@@ -533,7 +533,7 @@ function bestPlanForAsset(coin){
 function portfolioScan(){
   var p=portfolioState(),rows=[],positions=p.positions||{},candidates=[];
   for(var i=0;i<P.universe.length;i++){
-    var coin=P.universe[i],a=ensureAsset(coin),mk=portfolioMark(coin),liveReady=fresh(a.hl.lastPrice,10000)&&fresh(a.hl.lastBook,10000)&&finite(a.hl.price);
+    var coin=P.universe[i],a=ensureAsset(coin),mk=portfolioMark(coin),liveReady=fresh(a.hl.lastPrice,10000)&&fresh(a.hl.lastBbo,10000)&&finite(a.hl.price);
     if(!liveReady){
       rows.push({coin:coin,h:NaN,volume:P.volume[coin]||0,action:'CHARGEMENT',p:NaN,edge:NaN,ev:NaN,profitEvBps:NaN,tradeScore:-Infinity,pos:!!positions[coin],price:mk.price,entry:mk.pos?mk.pos.entry:NaN,sl:mk.pos?mk.pos.sl:NaN,tp:mk.pos?mk.pos.tp:NaN,pnl:mk.total,unreal:mk.unreal,realized:mk.realized});
       continue;
@@ -630,11 +630,18 @@ function sizeFloor(size,dec){
 function bookMid(book){
   var d=depth(book);return finite(d.bid)&&finite(d.ask)?(d.bid+d.ask)/2:NaN;
 }
-function marketPriceConsistent(a,book){
-  if(!a||!book)return false;
-  var mid=bookMid(book),ref=finite(a.hl.markPx)?a.hl.markPx:a.hl.price;
+function marketPriceConsistent(a,book,bbo){
+  if(!a)return false;
+  var mid=book?bookMid(book):NaN;
+  if(!finite(mid)&&bbo&&finite(+bbo.bid)&&finite(+bbo.ask))mid=(+bbo.bid+ +bbo.ask)/2;
+  var ref=finite(a.hl.markPx)?a.hl.markPx:a.hl.price;
   if(!finite(mid)||!finite(ref)||ref<=0)return false;
   return Math.abs(mid/ref-1)<=0.10;
+}
+function bboDepth(bbo){
+  if(!bbo||!finite(+bbo.bid)||!finite(+bbo.ask))return{};
+  var bid=+bbo.bid,ask=+bbo.ask,bs=finite(+bbo.bs)?+bbo.bs:1,as=finite(+bbo.as)?+bbo.as:1,mid=(bid+ask)/2;
+  return{bid:bid,ask:ask,bs:bs,as:as,imb:(bs-as)/(bs+as||1),microBias:((ask*bs+bid*as)/(bs+as||1)-mid)/(mid||1),spread:(ask-bid)/(mid||1)};
 }
 function histFresh(ts,maxAge){return ts>0&&(Math.abs(now()-ts)<=maxAge)}
 function spreadBps(f){return f&&f.depth&&finite(f.depth.spread)?f.depth.spread*10000:NaN}
@@ -693,6 +700,7 @@ function tapeATR(ms){
 }
 function feats(){
   var c=S.hl.candles,clo=c.map(function(q){return q.c}),d=depth(S.hl.book),p=pasr(),pr=fresh(S.hl.lastTrades,10000),l2=fresh(S.hl.lastBook,5000);
+  if(!finite(d.bid)&&S.hl.bbo)d=bboDepth(S.hl.bbo);
   var r1=ret(clo,1),r5=ret(clo,5),r15=ret(clo,15),r60=ret(clo,60);
   if(!finite(r1))r1=tapeReturn(60000);if(!finite(r5))r5=tapeReturn(300000);if(!finite(r15))r15=tapeReturn(900000);if(!finite(r60))r60=tapeReturn(3600000);
   var em=ema(clo.slice(-180),9)/ema(clo.slice(-180),21)-1;if(!finite(em)&&finite(r15))em=r15;
@@ -941,10 +949,13 @@ function targetThreshold(price,atr1m,h){
   return clamp(scaled,.0015,.06);
 }
 function recordForecast(h,f,m,pl){
-  var a0=ensureAsset(S.coin);if(!marketPriceConsistent(a0,S.hl.book))return false;
+  var a0=ensureAsset(S.coin);
+  if(!finite(S.hl.price)||!fresh(S.hl.lastPrice,12000))return false;
+  var bd=depth(S.hl.book);if(!finite(bd.bid)&&S.hl.bbo)bd=bboDepth(S.hl.bbo);
+  var spreadKnown=finite(bd.spread)&&marketPriceConsistent(a0,S.hl.book,S.hl.bbo),forecastSpread=spreadKnown?bd.spread*10000:NaN;
   var key=S.coin+'_'+h,arr=DB.pending[key]||[];DB.pending[key]=arr;
   var unresolved=arr.some(function(x){return x&&!x.paperResolved});if(unresolved)return false;
-  var rec={ts:now(),h:h,coin:S.coin,p0:S.hl.price,targetThr:targetThreshold(S.hl.price,f.atr,h),spreadBps:spreadBps(f),pBase:m.base.p.slice(),pFull:m.full.p.slice(),vBase:m.base.v.slice(),vFull:m.full.v.slice(),candidate:pl.candidate,entry:finite(pl.entry)?pl.entry:S.hl.price,direction:pl.candidate,dir:pl.candidate,atr:f.atr,pair:pl.pair||null,sl:pl.sl,tp:pl.tp,rr:pl.rr,paper:false,actionable:false,gateReasons:(pl.gateReasons||[]).slice(),createdBy:'V16_UNIVERSE_SHADOW'};
+  var rec={ts:now(),h:h,coin:S.coin,p0:S.hl.price,targetThr:targetThreshold(S.hl.price,f.atr,h),spreadBps:finite(forecastSpread)?forecastSpread:NaN,costKnown:finite(forecastSpread),pBase:m.base.p.slice(),pFull:m.full.p.slice(),vBase:m.base.v.slice(),vFull:m.full.v.slice(),candidate:pl.candidate,entry:finite(pl.entry)?pl.entry:S.hl.price,direction:pl.candidate,dir:pl.candidate,atr:f.atr,pair:pl.pair||null,sl:pl.sl,tp:pl.tp,rr:pl.rr,paper:false,actionable:false,gateReasons:(pl.gateReasons||[]).slice(),createdBy:'V16_UNIVERSE_SHADOW'};
   DB.pending[key].push(rec);var maxPending=Math.max(60,Math.min(400,Math.ceil(h*1.5)));DB.pending[key]=DB.pending[key].slice(-maxPending);save();return true;
 }
 function forecastAllUniverse(){
@@ -1138,6 +1149,7 @@ function updateAllDexCtxs(payload){
       if(dex==='')P.volume[coin]=finite(+q.dayNtlVlm)?+q.dayNtlVlm:(P.volume[coin]||0);
     }
   }
+  refreshMicroSubscriptions(false);
 }
 function subKey(s){
   return String(s&&s.type||'')+':'+String(s&&s.coin||'')+':'+String(s&&s.interval||'')+':'+String(s&&s.dex||'');
@@ -1162,15 +1174,46 @@ function pumpSubscriptions(ws){
   };
   step();
 }
+function microTargetSet(){
+  var desired={},rows=P.universe.map(function(coin){return{coin:coin,vol:+(P.volume[coin]||0)}}).sort(function(a,b){return b.vol-a.vol});
+  var lim=Math.min(P.microLimit||40,rows.length);
+  for(var i=0;i<lim;i++)desired[rows[i].coin]=true;
+  Object.keys(DB.portfolio&&DB.portfolio.positions||{}).forEach(function(coin){if(P.universe.indexOf(coin)>=0)desired[coin]=true});
+  if(P.focusCoin&&P.universe.indexOf(P.focusCoin)>=0)desired[P.focusCoin]=true;
+  return desired;
+}
+function refreshMicroSubscriptions(force){
+  var ws=S.hlSocket;if(!ws||ws.readyState!==1)return;
+  var t=now();if(!force&&t-P.lastMicroRefresh<15000)return;
+  P.lastMicroRefresh=t;
+  var desired=microTargetSet(),next={};
+  Object.keys(desired).forEach(function(coin){next[coin]=true});
+  var old=P.microAssets||{};
+  Object.keys(old).forEach(function(coin){
+    if(!next[coin]){
+      ['l2Book','trades'].forEach(function(type){
+        var sub={type:type,coin:coin},k=subKey(sub);
+        if(P.wsAcked[k]||P.wsWanted[k]){try{ws.send(JSON.stringify({method:'unsubscribe',subscription:sub}))}catch(e){}}
+        delete P.wsAcked[k];delete P.wsWanted[k];delete P.wsSentAt[k];delete P.wsSubDefs[k];
+      });
+    }
+  });
+  P.wsQueue=(P.wsQueue||[]).filter(function(sub){
+    return !(sub&&(sub.type==='l2Book'||sub.type==='trades')&&!next[sub.coin]);
+  });
+  P.microAssets=next;
+  for(var i=0;i<P.universe.length;i++)queueSubscription({type:'bbo',coin:P.universe[i]});
+  Object.keys(next).forEach(function(coin){
+    queueSubscription({type:'l2Book',coin:coin});
+    queueSubscription({type:'trades',coin:coin});
+  });
+  pumpSubscriptions(ws);
+}
 function subscribeNewPortfolioAssets(){
   var ws=S.hlSocket;if(!ws||ws.readyState!==1)return;
   queueSubscription({type:'allMids'});
   queueSubscription({type:'allDexsAssetCtxs'});
-  var list=P.universe.slice();
-  // Stage 1: every market gets order book + trades. Stage 2: candles enrich the same universe.
-  for(var i=0;i<list.length;i++)queueSubscription({type:'l2Book',coin:list[i]});
-  for(var j=0;j<list.length;j++)queueSubscription({type:'trades',coin:list[j]});
-  for(var q=0;q<list.length;q++)queueSubscription({type:'candle',coin:list[q],interval:'1m'});
+  refreshMicroSubscriptions(true);
   pumpSubscriptions(ws);
 }
 async function restSync(){
@@ -1205,11 +1248,11 @@ async function restSync(){
 function reconnectHL(){
   var attempt=0,timer=0;
   function go(){
-    attempt++;S.feed.HL_WS='RECONNECTING';
+    attempt++;P.wsState='RECONNECTING';P.wsReconnects=(P.wsReconnects||0)+1;S.feed.HL_WS='RECONNECTING';
     try{
       var ws=new WebSocket(HLWS);S.hlSocket=ws;
       ws.onopen=function(){
-        attempt=0;P.wsGeneration++;P.wsQueue=[];P.wsWanted={};P.wsAcked={};P.wsSentAt={};P.wsSubDefs={};clearTimeout(P.wsPumpTimer);P.wsPumpTimer=0;clearInterval(P.wsWatchdog);P.wsWatchdog=0;S.feed.HL_WS='OK';
+        attempt=0;P.wsGeneration++;P.wsQueue=[];P.wsWanted={};P.wsAcked={};P.wsSentAt={};P.wsSubDefs={};clearTimeout(P.wsPumpTimer);P.wsPumpTimer=0;clearInterval(P.wsWatchdog);P.wsWatchdog=0;P.wsState='OK';P.wsError='';S.feed.HL_WS='OK';
         subscribeNewPortfolioAssets();
         P.wsWatchdog=setInterval(function(){
           if(ws!==S.hlSocket||ws.readyState!==1)return;
@@ -1235,6 +1278,9 @@ function reconnectHL(){
         }else if(m.channel==='allMids'&&m.data&&m.data.mids){
           Object.keys(m.data.mids).forEach(function(coin){var a=ensureAsset(coin),px=+m.data.mids[coin];if(finite(px)){a.hl.price=px;a.hl.lastPrice=t;a.tape.push({t:t,p:px});a.tape=a.tape.slice(-12000)}});
           S.hl=ensureAsset(S.coin).hl;S.tape=ensureAsset(S.coin).tape;
+        }else if(m.channel==='bbo'&&m.data){
+          var b=m.data.data||m.data,coinB=b.coin||S.coin,bb=Array.isArray(b.bbo)?b.bbo:[null,null],bidB=bb[0],askB=bb[1];
+          if(bidB&&askB){var ab=ensureAsset(coinB);ab.hl.bbo={bid:+bidB.px,ask:+askB.px,bs:+bidB.sz,as:+askB.sz,time:+b.time||t};ab.hl.lastBbo=t;ab.feed.HL_L2='OK';if(coinB===S.coin)S.hl=ab.hl}
         }else if(m.channel==='l2Book'&&m.data){
           var d=m.data.data||m.data,coin=d.coin||S.coin;if(Array.isArray(d.levels)&&d.levels.length>=2){var a=ensureAsset(coin);a.hl.book=d;a.hl.lastBook=t;a.feed.HL_L2='OK';if(coin===S.coin)S.hl=a.hl}
         }else if(m.channel==='trades'&&m.data){
@@ -1253,9 +1299,9 @@ function reconnectHL(){
           }
         }
       }catch(e){diagError('HL_WS_MESSAGE',e)}};
-      ws.onclose=function(){clearInterval(timer);clearInterval(P.wsWatchdog);P.wsWatchdog=0;clearTimeout(P.wsPumpTimer);P.wsPumpTimer=0;P.wsQueue=[];P.wsWanted={};P.wsAcked={};P.wsSentAt={};P.wsSubDefs={};S.feed.HL_WS='RECONNECTING';setTimeout(go,clamp(1000*Math.pow(2,Math.min(attempt,6)),1000,30000))};
-      ws.onerror=function(){try{ws.close()}catch(e){}};
-    }catch(e){setTimeout(go,3000)}
+      ws.onclose=function(){P.wsState='RECONNECTING';clearInterval(timer);clearInterval(P.wsWatchdog);P.wsWatchdog=0;clearTimeout(P.wsPumpTimer);P.wsPumpTimer=0;P.wsQueue=[];P.wsWanted={};P.wsAcked={};P.wsSentAt={};P.wsSubDefs={};S.feed.HL_WS='RECONNECTING';setTimeout(go,clamp(1000*Math.pow(2,Math.min(attempt,6)),1000,30000))};
+      ws.onerror=function(e){P.wsState='ERROR';P.wsError='WebSocket error';try{ws.close()}catch(_){}};
+    }catch(e){P.wsState='ERROR';P.wsError=String(e&&e.message||e);setTimeout(go,3000)}
   }
   go();
 }
@@ -1378,7 +1424,7 @@ function renderCapital(){
   }catch(e){$('capitalCards').innerHTML='<div class="note">Performance indisponible temporairement : '+String(e.message||e)+'</div>';}
 }
 function renderHealth(){
-  var f={HL_WS:S.feed.HL_WS,HL_L2:fresh(S.hl.lastBook,7000)?'OK':(S.hlSocket&&S.hlSocket.readyState===1?'WAIT':'STALE'),HL_TRADES:fresh(S.hl.lastTrades,12000)?'OK':(S.hlSocket&&S.hlSocket.readyState===1?'WAIT':'STALE'),HL_CTX:fresh(S.hl.lastCtx,30000)?'OK':'WAIT'};
+  var f={HL_WS:P.wsState,HL_BBO:fresh(S.hl.lastBbo,10000)?'OK':(S.hlSocket&&S.hlSocket.readyState===1?'WAIT':'STALE'),HL_L2:fresh(S.hl.lastBook,7000)?'OK':(S.hlSocket&&S.hlSocket.readyState===1?'WAIT':'STALE'),HL_TRADES:fresh(S.hl.lastTrades,12000)?'OK':(S.hlSocket&&S.hlSocket.readyState===1?'WAIT':'STALE'),HL_CTX:fresh(S.hl.lastCtx,30000)?'OK':'WAIT'};
   var map=Object.keys(f).map(function(k){var v=f[k],cls=v==='OK'?'ok':v==='WAIT'?'warn':'bad';return'<div class="src"><div class="tiny">'+k+'</div><b class="'+cls+'">'+v+'</b></div>'}).join('');
   var desired=Object.keys(P.wsSubDefs||{}).length,acked=Object.keys(P.wsAcked||{}).length,queue=(P.wsQueue||[]).length;
   var liveReady=0;for(var i=0;i<P.universe.length;i++){var a=P.states[P.universe[i]];if(a&&fresh(a.hl.lastPrice,10000)&&fresh(a.hl.lastBook,10000)&&fresh(a.hl.lastTrades,15000))liveReady++}
