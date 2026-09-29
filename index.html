@@ -386,7 +386,7 @@ var P={
   assets:[],universe:[],states:{},volume:{},wsSubscribed:{},
   focusCoin:'',focusH:5,
   maxAssets:Infinity,maxSlots:Infinity,maxConcurrentPositions:4,maxLeverage:5,maxMarginPct:.20,maxPortfolioRiskPct:.02,maxSameSide:Infinity,
-  maxRoundTripCostBps:24,minNetEvBps:3,seedNetEvBps:6,seedProfitObs:5,minSeedDQ:60,minGlobalProfitObs:200,minAssetProfitObs:5,minGlobalModelObs:120,minAssetLiveObs:20,timeStopMultiple:2,
+  maxRoundTripCostBps:24,minNetEvBps:3,seedNetEvBps:8,seedProfitObs:0,minSeedDQ:60,minGlobalProfitObs:200,minAssetProfitObs:5,minGlobalModelObs:120,minAssetLiveObs:20,timeStopMultiple:2,
   bootstrapConcurrency:1,bootstrapIntervalMs:60000,bootstrapMinSpacingMs:2500,bootstrapRunning:false,bootstrapIntervalSince:0,
   wsQueue:[],wsWanted:{},wsAcked:{},wsSentAt:{},wsSubDefs:{},wsPumpTimer:0,wsWatchdog:0,wsLastData:0,wsGeneration:0,
   perpDexNames:[''],universeByDex:{},resolveRestNext:0,
@@ -437,7 +437,8 @@ function portfolioOpen(coin,h,f,pl){
   if(ks.length>=P.maxConcurrentPositions)return reject('POSITION_CAP');
   if(p.positions[coin])return reject('ALREADY_OPEN');
   var localSeen=withAsset(coin,function(){return model(h,'base').seen||0});
-  if(localSeen<120)return reject('MODEL_WARMUP '+localSeen+'/120');
+  var seedMode=pl&&pl.mode==='SEED';
+  if(!seedMode&&localSeen<120)return reject('MODEL_WARMUP '+localSeen+'/120');
   if(pl.direction!=='LONG'&&pl.direction!=='SHORT')return reject('NO_TRADE');
   if(!finite(pl.entry)||!finite(pl.sl)||!finite(pl.tp)||!finite(f.atr)||f.atr<=0)return reject('INVALID_PLAN');
   if(P.cooldown[coin]&&t<P.cooldown[coin])return reject('COOLDOWN');
@@ -833,7 +834,7 @@ function orderPlan(h,f,m){
     profitEv:profitEv,profitEvBps:finite(profitEv)?profitEv*10000:NaN,blendedEv:blendedEv,blendedEvBps:finite(blendedEv)?blendedEv*10000:NaN,
     profitObs:profitObs,localProfitObs:localProfitObs,modelSeen:modelSeen,tradeScore:tradeScore,
     entry:gate?NaN:entry,sl:gate?NaN:sl,tp:gate?NaN:tp,rr:gate?NaN:rr,size:gate?NaN:sz,ev:gate?NaN:blendedEv,evR:gate?NaN:classEv,
-    pair:pair,gateReasons:gateReasons,reason:gate?'Portail fermé : '+gateReasons.join(' · '):(seedMode?'Portail SEED ouvert : EV nette exigeante en attendant la calibration complète.':'Portail FULL ouvert : rendement net calibré sur les réalisations de tout l’univers.')
+    pair:pair,gateReasons:gateReasons,reason:gate?'Portail fermé : '+gateReasons.join(' · '):(seedMode?'Portail SEED ouvert : modèle global mûr + BBO cohérent + EV nette élevée; la calibration locale/FULL se construit ensuite.':'Portail FULL ouvert : rendement net calibré sur les réalisations de tout l’univers.')
   };
 }
 function hlabel(h){return h===1440?'1j':h===60?'1h':h===240?'4h':h+'m'}
