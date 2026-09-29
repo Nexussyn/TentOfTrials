@@ -1062,28 +1062,62 @@ function pasrVerdict(h){
 async function hl(body){
   return fetchJSON(HLAPI,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)},7000);
 }
-function updateAllDexUniverse(metaAll){
-  if(!Array.isArray(metaAll)||!metaAll.length)return;
-  var rank=[],byDex={},names=P.perpDexNames||[''];
+function updateNativeUniverseFromMetaCtx(ctx){
+  if(!Array.isArray(ctx)||!ctx[0]||!Array.isArray(ctx[0].universe))return false;
+  var u=ctx[0].universe,ac=Array.isArray(ctx[1])?ctx[1]:[],rank=[];
+  for(var i=0;i<u.length;i++){
+    var meta=u[i]||{},q=ac[i]||{},name=meta.name,lev=+meta.maxLeverage;
+    if(!name||meta.isDelisted===true||finite(lev)&&lev<=0)continue;
+    var a=ensureAsset(name);
+    a.dex='';a.maxLeverage=finite(lev)?lev:NaN;a.szDecimals=finite(+meta.szDecimals)?+meta.szDecimals:NaN;
+    a.onlyIsolated=meta.onlyIsolated===true||meta.marginMode==='strictIsolated'||meta.marginMode==='noCross';
+    a.marginMode=meta.marginMode||(a.onlyIsolated?'isolated':'cross');
+    if(finite(+q.midPx))a.hl.price=+q.midPx;
+    if(finite(+q.markPx))a.hl.markPx=+q.markPx;
+    if(finite(+q.oraclePx))a.hl.oraclePx=+q.oraclePx;
+    if(finite(+q.dayNtlVlm))a.hl.dayNtlVlm=+q.dayNtlVlm;
+    if(finite(+q.openInterest))a.hl.oi=+q.openInterest;
+    if(finite(+q.funding))a.hl.funding=+q.funding;
+    a.hl.lastCtx=now();a.feed.HL_CTX='OK';
+    rank.push({coin:name,dex:'',vol:finite(+q.dayNtlVlm)?+q.dayNtlVlm:0});
+  }
+  if(!rank.length)return false;
+  rank.sort(function(a,b){return b.vol-a.vol});
+  var next=[],seen={};
+  for(var j=0;j<rank.length;j++){var coin=rank[j].coin;if(seen[coin])continue;seen[coin]=true;next.push(coin)}
+  P.universe=next;P.assets=next.slice();P.volume={};P.universeByDex={'':next.slice()};
+  for(var k=0;k<rank.length;k++)P.volume[rank[k].coin]=rank[k].vol;
+  P.maxSlots=Math.max(1,P.universe.length);P.maxAssets=P.universe.length;P.lastMeta=now();
+  if(S.hlSocket&&S.hlSocket.readyState===1)subscribeNewPortfolioAssets();
+  return true;
+}
+function updateAllDexUniverse(metaAll,dexs){
+  if(!Array.isArray(metaAll)||!metaAll.length)return false;
+  var rank=[],byDex={},names=Array.isArray(dexs)?dexs.map(function(x){return x&&x.name?String(x.name):''}):[''];
   for(var bi=0;bi<metaAll.length;bi++){
-    var meta=metaAll[bi]||{},dex=names[bi]!=null?String(names[bi]):(bi===0?'':'dex'+bi);
+    var meta=metaAll[bi]||{},dex=names[bi]!=null?names[bi]:(bi===0?'':'dex'+bi);
     if(!Array.isArray(meta.universe))continue;
     var list=[];
     for(var ui=0;ui<meta.universe.length;ui++){
-      var x=meta.universe[ui]||{},name=x.name,lev=+x.maxLeverage;
-      if(!name||x.isDelisted===true||finite(lev)&&lev<=0)continue;
+      var x=meta.universe[ui]||{},raw=x.name,lev=+x.maxLeverage;
+      if(!raw||x.isDelisted===true||finite(lev)&&lev<=0)continue;
+      var name=dex?(String(raw).indexOf(dex+':')===0?String(raw):dex+':'+String(raw)):String(raw);
       list.push(name);
-      var a=ensureAsset(name);a.dex=dex;a.maxLeverage=finite(lev)?lev:NaN;a.szDecimals=finite(+x.szDecimals)?+x.szDecimals:NaN;a.onlyIsolated=x.onlyIsolated===true||x.marginMode==='strictIsolated'||x.marginMode==='noCross';a.marginMode=x.marginMode||(a.onlyIsolated?'isolated':'cross');
+      var a=ensureAsset(name);a.dex=dex;a.maxLeverage=finite(lev)?lev:NaN;a.szDecimals=finite(+x.szDecimals)?+x.szDecimals:NaN;
+      a.onlyIsolated=x.onlyIsolated===true||x.marginMode==='strictIsolated'||x.marginMode==='noCross';
+      a.marginMode=x.marginMode||(a.onlyIsolated?'isolated':'cross');
       rank.push({coin:name,dex:dex,vol:finite(a.hl.dayNtlVlm)?a.hl.dayNtlVlm:0});
     }
-    byDex[dex]=list;
+    if(list.length)byDex[dex]=list;
   }
   var next=[],seen={};
-  for(var ri=0;ri<rank.length;ri++){var c=rank[ri].coin;if(seen[c])continue;seen[c]=true;next.push(c)}
+  for(var ri=0;ri<rank.length;ri++){var c0=rank[ri].coin;if(seen[c0])continue;seen[c0]=true;next.push(c0)}
+  if(!next.length)return false;
   P.universe=next;P.assets=next.slice();P.volume={};P.universeByDex=byDex;
   for(var rj=0;rj<rank.length;rj++){var z=rank[rj];P.volume[z.coin]=Math.max(P.volume[z.coin]||0,z.vol||0)}
   P.maxSlots=Math.max(1,P.universe.length);P.maxAssets=P.universe.length;P.lastMeta=now();
   if(S.hlSocket&&S.hlSocket.readyState===1)subscribeNewPortfolioAssets();
+  return true;
 }
 function updateAllDexCtxs(payload){
   var groups=payload&&payload.ctxs;
@@ -1140,21 +1174,33 @@ function subscribeNewPortfolioAssets(){
   pumpSubscriptions(ws);
 }
 async function restSync(){
-  var t=now(),metaAll=null,dexs=null;
+  var t=now(),metaAll=null,dexs=null,metaCtx=null,errs=[];
   try{
     var metaJobs=await Promise.all([
-      hl({type:'allPerpMetas'}).catch(function(){return null}),
-      hl({type:'perpDexs'}).catch(function(){return null})
+      hl({type:'allPerpMetas'}).catch(function(e){errs.push('allPerpMetas: '+String(e&&e.message||e));return null}),
+      hl({type:'perpDexs'}).catch(function(e){errs.push('perpDexs: '+String(e&&e.message||e));return null}),
+      hl({type:'metaAndAssetCtxs'}).catch(function(e){errs.push('metaAndAssetCtxs: '+String(e&&e.message||e));return null})
     ]);
-    metaAll=metaJobs[0];dexs=metaJobs[1];
-    if(Array.isArray(dexs)){
-      P.perpDexNames=dexs.map(function(x){return x&&x.name?String(x.name):''});
-      if(P.perpDexNames.length===0)P.perpDexNames=[''];
+    metaAll=metaJobs[0];dexs=metaJobs[1];metaCtx=metaJobs[2];
+
+    var updated=false;
+    if(Array.isArray(metaAll)){
+      updated=updateAllDexUniverse(metaAll,dexs)||updated;
+    }else if(metaAll&&Array.isArray(metaAll.universe)){
+      updated=updateAllDexUniverse([metaAll],[''])||updated;
     }
-    if(Array.isArray(metaAll))updateAllDexUniverse(metaAll);
-  }catch(e){}
+    if(!updated&&Array.isArray(metaCtx))updated=updateNativeUniverseFromMetaCtx(metaCtx);
+
+    if(!updated&&P.universe.length===0){
+      S.feed.HL_CTX='WAIT';
+      if(errs.length)diagError('UNIVERSE_DISCOVERY',new Error(errs.join(' | ')));
+    }
+  }catch(e){
+    errs.push(String(e&&e.message||e));
+    if(P.universe.length===0)diagError('UNIVERSE_DISCOVERY',e);
+  }
   S.lastRest=t;
-  return{meta:!!metaAll,dexs:Array.isArray(dexs)?dexs.length:0,assets:P.universe.length};
+  return{meta:Array.isArray(metaAll)||!!(metaAll&&metaAll.universe),dexs:Array.isArray(dexs)?dexs.length:0,ctx:Array.isArray(metaCtx),assets:P.universe.length,errors:errs};
 }
 function reconnectHL(){
   var attempt=0,timer=0;
