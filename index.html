@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Crypto Direction Engine — V15.0 GLOBAL UNIVERSE</title>
+<title>Crypto Direction Engine — V16.0 UNIVERSE ALPHA</title>
 <style>
 :root{--bg:#061016;--p:#0c1a22;--p2:#09161d;--l:#243843;--t:#edf4f7;--m:#8ea3ad;--u:#43d19d;--d:#ff7082;--n:#f0bf55;--c:#67d7ef}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 15% 0,#122a32,#061016 42%,#050b0f);color:var(--t);font:14px/1.4 system-ui,-apple-system,Segoe UI,sans-serif}
@@ -32,26 +32,25 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
 <body>
 <header class="top">
   <div>
-    <div class="brand">CRYPTO DIRECTION ENGINE · V15.0 GLOBAL UNIVERSE</div>
-    <div class="tag">Hyperliquid primaire · Binance cross-venue · self-evaluating · persistance double · OOS résoluble après fermeture · aucune exécution réelle</div>
+    <div class="brand">CRYPTO DIRECTION ENGINE · V16.0 UNIVERSE ALPHA</div>
+    <div class="tag">Hyperliquid natif · univers complet du perp DEX primaire · sélection cross-sectionnelle · apprentissage OOS global · aucune exécution réelle</div>
   </div>
   <div class="ctrl">
-    <select id="coin" title="Marché de focus"><option selected>AUTO</option><option>BTC</option><option>ETH</option><option>SOL</option></select>
-    <select id="hor" title="Horizon de résolution de la prévision"><option value="5" selected>5m</option><option value="15">15m</option><option value="60">1h</option><option value="240">4h</option><option value="1440">1j</option></select>
+    <span class="badge">AUTO · TOUT L'UNIVERS</span>
     <input id="capital" type="number" value="1000" min="10" step="10" title="Capital de référence en USDC">
     <input id="risk" type="number" value="0.5" min="0.05" max="5" step="0.05" title="Risque maximum théorique par idée, en % du capital">
     <input id="fee" type="number" value="4.5" min="0" max="20" step="0.1" title="Frais taker simulés par côté, en bps">
     <input id="slip" type="number" value="1.5" min="0" max="20" step="0.1" title="Slippage conservateur par côté, en bps">
-    <button id="relearn" title="Initialise le modèle une fois à partir de l'historique prix; ne détruit pas l'apprentissage live">Warm-start</button>
+    <button id="relearn" title="Lance le bootstrap historique disponible sans effacer l'apprentissage live">Bootstrap univers</button>
   </div>
 </header>
 
 <main class="wrap">
 <div id="bootBanner" class="panel note" style="display:none"></div>
 <div class="panel note">
-  <b>SORTIE UNIQUE :</b> <span id="headline">initialisation…</span>
-  · <b>NO TRADE</b> est une décision valide.
-  · <b>Missing ≠ neutral</b> : une donnée absente retire la feature. Le portail ne dépend pas d'une feature secondaire absente si les sources critiques restent fraîches.
+  <b>UNIVERSE ALPHA :</b> <span id="headline">initialisation…</span>
+  · le moteur scanne chaque marché disponible, évalue plusieurs horizons, mesure les rendements nets réellement observés et sélectionne uniquement les meilleures opportunités.
+  · <b>NO TRADE</b> reste valide pendant la calibration.
 </div>
 
 <div class="grid" style="margin-top:12px">
