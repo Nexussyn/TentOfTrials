@@ -1379,7 +1379,7 @@ function dashboard(){
   var ages=[S.hl.lastBook,S.hl.lastTrades,S.hl.lastCtx].filter(function(x){return x>0}).map(function(x){return Math.max(0,now()-x)/1000});$('kFresh').textContent=ages.length?Math.round(Math.max.apply(null,ages))+'s':'—';
   $('chartInfo').textContent='HL '+nfmt(S.hl.price)+' · focus dynamique '+P.focusCoin;
   try{renderCapital()}catch(e){}try{renderPortfolio()}catch(e){}try{renderHealth()}catch(e){}try{journal()}catch(e){}
-  $('audit').textContent='V16 = portefeuille unique sur tout l’univers Hyperliquid. Les anciens comptes paper par horizon ne pilotent plus l’ouverture. Chaque marché est évalué sur les horizons '+TRADE_H.join('/')+' min, puis le meilleur horizon par actif est comparé aux autres actifs. Les shadow forecasts OOS sont créés même lorsque NO TRADE est affiché; à résolution, leur rendement net après frais, slippage et spread alimente la calibration globale et locale. Aucune donnée Binance n’est nécessaire à la décision. Les nouvelles positions sont limitées aux meilleures opportunités et au budget de risque agrégé; un time-stop empêche une position de monopoliser le capital. Rentabilité non présumée : elle doit être démontrée par le rendement net OOS.';
+  $('audit').textContent='V16.1 = comptabilité capital-réel propre. Le capital V15/V16 précédent est archivé et exclu du nouveau rendement; le modèle repart de zéro sur les données de prix puis apprend uniquement sur les observations live OOS valides.' Chaque marché est évalué sur les horizons '+TRADE_H.join('/')+' min, puis le meilleur horizon par actif est comparé aux autres actifs. Les shadow forecasts OOS sont créés même lorsque NO TRADE est affiché; à résolution, leur rendement net après frais, slippage et spread alimente la calibration globale et locale. Aucune donnée Binance n’est nécessaire à la décision. Les nouvelles positions sont limitées aux meilleures opportunités et au budget de risque agrégé; un time-stop empêche une position de monopoliser le capital. Rentabilité non présumée : elle doit être démontrée par le rendement net OOS.';
 }
 function migrateV16(){
   if(DB.accountingEpoch===16.1)return;
@@ -1391,6 +1391,8 @@ function migrateV16(){
   DB.obs={};
   DB.pending={};
   DB.paper={};
+  DB.models={};
+  DB.pretrain={};
   DB.profitBackfillVersion=0;
   DB.accountingEpoch=16.1;
   save();
@@ -1424,7 +1426,7 @@ function assertSelfTest(){
 async function boot(){
   try{
     stage('BOOT');
-    S.coin='';S.h=5;S.capital=+$('capital').value||1000;S.risk=+$('risk').value||.5;S.fee=+$('fee').value||0;S.slip=+$('slip').value||1.5;
+    S.coin='';S.h=5;S.capital=+$('capital').value||1000;S.risk=+$('risk').value||.5;S.fee=Math.max(4.5,+$('fee').value||4.5);S.slip=Math.max(0,+$('slip').value||1.5);
     migrateV16();dashboard();
     if(SELFTEST){
       stage('SELFTEST');S.coin='TEST';P.focusCoin='TEST';P.focusH=5;P.universe=['TEST'];ensureAsset('TEST');syntheticState();P.signalsRows=[{coin:'TEST',h:5,price:S.hl.price,tradeScore:1,action:'LONG'}];dashboard();assertSelfTest();stage('SELFTEST PASS');return;
@@ -1459,8 +1461,8 @@ async function boot(){
 
 $('capital').oninput=function(){S.capital=+$('capital').value||1000};
 $('risk').oninput=function(){S.risk=+$('risk').value||.5};
-$('fee').oninput=function(){S.fee=+$('fee').value||0};
-$('slip').oninput=function(){S.slip=+$('slip').value||0};
+$('fee').oninput=function(){S.fee=Math.max(4.5,+$('fee').value||4.5)};
+$('slip').oninput=function(){S.slip=Math.max(0,+$('slip').value||0)};
 $('relearn').onclick=function(){warmStart().then(function(){dashboard()}).catch(function(e){diagError('BOOTSTRAP_MANUAL',e)})};
 boot();
 </script>
