@@ -141,9 +141,9 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
     <div class="stat"><div class="tiny">BASIS</div><div id="basis" class="val">—</div></div>
   </div>
   <div class="stats" style="margin-top:7px">
-    <div class="stat"><div class="tiny">SPOT FLOW</div><div id="spotCvd" class="val">—</div></div>
-    <div class="stat"><div class="tiny">PERP FLOW</div><div id="perpCvd" class="val">—</div></div>
-    <div class="stat"><div class="tiny">LIQ 5m</div><div id="liq" class="val">—</div></div>
+    <div class="stat"><div class="tiny">TRADE FLOW</div><div id="spotCvd" class="val">—</div></div>
+    <div class="stat"><div class="tiny">ABSORPTION</div><div id="perpCvd" class="val">—</div></div>
+    <div class="stat"><div class="tiny">VOLUME 24h</div><div id="liq" class="val">—</div></div>
     <div class="stat"><div class="tiny">ATR 1m</div><div id="atr" class="val">—</div></div>
   </div>
 </div>
@@ -1287,64 +1287,54 @@ function renderCapital(){
   }catch(e){$('capitalCards').innerHTML='<div class="note">Performance indisponible temporairement : '+String(e.message||e)+'</div>';}
 }
 function renderHealth(){
-  var f=Object.assign({},S.feed);
-  f.HL_L2=fresh(S.hl.lastBook,7000)?'OK':(S.hlSocket&&S.hlSocket.readyState===1?'WAIT':'STALE');
-  f.HL_TRADES=fresh(S.hl.lastTrades,12000)?'OK':(S.hlSocket&&S.hlSocket.readyState===1?'WAIT':'STALE');
-  var map=Object.keys(f).map(function(k){var v=f[k],cls=v==='OK'?'ok':v==='STALE'?'warn':'bad';return'<div class="src"><div class="tiny">'+k+'</div><b class="'+cls+'">'+v+'</b></div>'}).join('');
-  $('health').innerHTML=map;$('healthText').textContent=S.coin+' · '+new Date().toLocaleTimeString('fr-FR')+' · tick '+(S.hl.lastPrice?Math.max(0,Math.round((now()-S.hl.lastPrice)/1000)):'—')+'s · sauvegarde: localStorage + IndexedDB';
+  var f={HL_WS:S.feed.HL_WS,HL_L2:fresh(S.hl.lastBook,7000)?'OK':(S.hlSocket&&S.hlSocket.readyState===1?'WAIT':'STALE'),HL_TRADES:fresh(S.hl.lastTrades,12000)?'OK':(S.hlSocket&&S.hlSocket.readyState===1?'WAIT':'STALE'),HL_CTX:fresh(S.hl.lastCtx,30000)?'OK':'WAIT'};
+  var map=Object.keys(f).map(function(k){var v=f[k],cls=v==='OK'?'ok':v==='WAIT'?'warn':'bad';return'<div class="src"><div class="tiny">'+k+'</div><b class="'+cls+'">'+v+'</b></div>'}).join('');
+  var desired=Object.keys(P.wsSubDefs||{}).length,acked=Object.keys(P.wsAcked||{}).length,queue=(P.wsQueue||[]).length;
+  var liveReady=0;for(var i=0;i<P.universe.length;i++){var a=P.states[P.universe[i]];if(a&&fresh(a.hl.lastPrice,10000)&&fresh(a.hl.lastBook,10000)&&fresh(a.hl.lastTrades,15000))liveReady++}
+  $('health').innerHTML=map;$('healthText').textContent=P.universe.length+' marchés · live-ready '+liveReady+' · subscriptions '+acked+'/'+Math.max(desired,acked)+' acquittées · file '+queue+' · focus '+(P.focusCoin||'—')+' '+(P.focusH||'—')+' · '+new Date().toLocaleTimeString('fr-FR')+' · Hyperliquid natif';
 }
-function journal(){
-  $('journal').innerHTML=H.map(function(h){
-    var s=globalStatsFor(h),ver=s.n<100?'CALIBRATING':pasrVerdict(h);
-    return'<tr><td>'+hlabel(h)+'</td><td>'+globalPretrainCount(h)+'</td><td>'+s.n+'</td><td>—</td><td>'+s.actionableN+'</td><td>'+nfmt(s.b,4)+'</td><td>'+nfmt(s.ll,4)+'</td><td>'+pct(s.hit,1)+'</td><td>'+(finite(s.net)?(s.net*10000).toFixed(2)+' bps':'—')+'</td><td>'+nfmt(s.delta,4)+'</td><td>'+ver+'</td></tr>';
-  }).join('');
-}
-function draw(){
-  var a=S.hl.candles.slice(-180),c=$('chart'),x=c.getContext('2d'),r=c.getBoundingClientRect(),d=devicePixelRatio||1;
-  c.width=r.width*d;c.height=r.height*d;x.scale(d,d);x.clearRect(0,0,r.width,r.height);if(a.length<2)return;
-  var lo=Math.min.apply(null,a.map(function(q){return q.l})),hi=Math.max.apply(null,a.map(function(q){return q.h})),rg=hi-lo||1;
-  var X=function(i){return 36+i/(a.length-1)*(r.width-48)},Y=function(v){return 12+(hi-v)/rg*(r.height-44)};
-  x.strokeStyle='#17303b';for(var i=0;i<5;i++){var yy=12+i/4*(r.height-44);x.beginPath();x.moveTo(36,yy);x.lineTo(r.width-12,yy);x.stroke()}
-  for(var j=0;j<a.length;j++){var q=a[j],cx=X(j),up=q.c>=q.o;x.strokeStyle=up?'#43d19d':'#ff7082';x.beginPath();x.moveTo(cx,Y(q.h));x.lineTo(cx,Y(q.l));x.stroke();x.fillStyle=x.strokeStyle;x.fillRect(cx-1.6,Y(Math.max(q.o,q.c)),3.2,Math.max(1,Y(Math.min(q.o,q.c))-Y(Math.max(q.o,q.c))))}
+function selectFocus(){
+  var rows=(P.signalsRows||[]).filter(function(x){return x&&finite(x.price)&&x.h});
+  rows.sort(function(a,b){var aa=finite(a.tradeScore)?a.tradeScore:-Infinity,bb=finite(b.tradeScore)?b.tradeScore:-Infinity;return bb-aa});
+  var best=rows[0];
+  if(best){P.focusCoin=best.coin;P.focusH=+best.h||5;attachAsset(best.coin);S.coin=best.coin;S.h=P.focusH;return best}
+  return null;
 }
 function dashboard(){
+  var focus=selectFocus();
+  if(!focus){
+    $('dir').textContent=P.universe.length?'CALIBRATION':'CONNEXION';$('dir').className='dir neu';$('prob').textContent='—';$('headline').textContent=P.universe.length?'calibration du rendement net réalisée sur tout l’univers · NO TRADE probatoire':'attente de la découverte de l’univers Hyperliquid';
+    $('act').textContent='NO TRADE';$('ord').textContent='WAIT';$('entry').textContent='—';$('sl').textContent='—';$('tp').textContent='—';$('rr').textContent='—';$('size').textContent='—';$('whyOrder').textContent='Le moteur n’emploie pas un actif de référence fixe : il attend les données de l’univers et la calibration OOS réelle.';
+    try{renderCapital()}catch(e){}try{renderPortfolio()}catch(e){}try{renderHealth()}catch(e){}try{journal()}catch(e){}return;
+  }
+  attachAsset(P.focusCoin);S.coin=P.focusCoin;S.h=P.focusH;
   var f=feats(),m=mixed(S.h,f),pl=orderPlan(S.h,f,m),q=pl.q,dir=pl.direction,st=statsFor(S.h),pv=pasrVerdict(S.h);
   $('dir').textContent=dir;$('dir').className='dir '+(dir==='LONG'?'up':dir==='SHORT'?'down':'neu');
   $('prob').textContent=dir==='NO TRADE'?'—':(pl.pd*100).toFixed(0)+'%';$('hz').textContent=hlabel(S.h);
   $('pL').textContent=pct(m.p[2]);$('pN').textContent=pct(m.p[1]);$('pS').textContent=pct(m.p[0]);
-  $('bL').style.width=m.p[2]*100+'%';$('bN').style.width=m.p[1]*100+'%';$('bS').style.width=m.p[0]*100+'%';$('bL').style.background='var(--u)';$('bN').style.background='var(--n)';$('bS').style.background='var(--d)';
+  $('bL').style.width=m.p[2]*100+'%';$('bN').style.width=m.p[1]*100+'%';$('bS').style.width=m.p[0]*100+'%';
   var regime=Math.abs(f.r15||0)>.003?'TREND':Math.abs(f.l2||0)>.4?'LIQUIDITÉ':'TRANSITION';
-  $('reg').textContent='Régime '+regime+' · DQ '+q+'/100';$('dq').textContent='DQ '+q;$('score').textContent='P(L)-P(S) '+(m.p[2]-m.p[0]).toFixed(3);
-  $('act').textContent=dir==='LONG'?'BUY':dir==='SHORT'?'SELL':'NO TRADE';$('ord').textContent=dir==='NO TRADE'?'ABSTAIN':'READY';
+  $('reg').textContent='Focus dynamique '+P.focusCoin+' · '+hlabel(S.h)+' · '+regime+' · DQ '+q+'/100';$('dq').textContent='DQ '+q;$('score').textContent='EV nette calibrée '+(finite(pl.blendedEvBps)?pl.blendedEvBps.toFixed(2)+' bps':'—');
+  $('act').textContent=dir==='LONG'?'BUY':dir==='SHORT'?'SELL':'NO TRADE';$('ord').textContent=dir==='NO TRADE'?'WAIT':'READY';
   $('entry').textContent=nfmt(pl.entry);$('sl').textContent=nfmt(pl.sl);$('tp').textContent=nfmt(pl.tp);$('rr').textContent=finite(pl.rr)?'1:'+pl.rr.toFixed(2):'—';$('size').textContent=finite(pl.size)?pl.size.toFixed(5):'—';
-  $('whyOrder').textContent=pl.reason;$('gateInfo').textContent='Candidat '+pl.candidate+' · prob '+(pl.pd*100).toFixed(1)+'% · edge '+(pl.edge*100).toFixed(1)+' pts · EV '+(finite(pl.ev)?(pl.ev*10000).toFixed(2)+' bps':'—')+' · TP '+(pl.pair?pl.pair.tp:'—')+' ATR · SL '+(pl.pair?pl.pair.sl:'—')+' ATR · evidence '+(finite(pl.evidence)?pl.evidence.toFixed(3):'—')+' · poids evidence '+Math.round(m.evidenceWeight*100)+'%';$('headline').textContent=dir==='NO TRADE'?'candidat '+pl.candidate+' mais portail fermé':'plan '+(dir==='LONG'?'acheteur':'vendeur')+' généré';
-  $('invalidate').textContent='Invalidation : DQ < 75, probabilité directionnelle < 50 %, edge < 3 pts, évidence < 0,08, coût > '+P.maxRoundTripCostBps+' bps ou EV < 2 bps.';
+  $('whyOrder').textContent=pl.reason;
+  $('gateInfo').textContent='Candidat '+pl.candidate+' · prob '+(pl.pd*100).toFixed(1)+'% · EV class. '+(finite(pl.evR)?(pl.evR*10000).toFixed(2)+' bps':'—')+' · EV nette calibrée '+(finite(pl.blendedEvBps)?pl.blendedEvBps.toFixed(2)+' bps':'—')+' · OOS '+pl.profitObs+' global / '+pl.localProfitObs+' actif · coût '+(finite(pl.costBps)?pl.costBps.toFixed(2):'—')+' bps · TP '+(pl.pair?pl.pair.tp:'—')+' ATR · SL '+(pl.pair?pl.pair.sl:'—')+' ATR';
+  $('headline').textContent=dir==='NO TRADE'?'surveillance de '+P.focusCoin+' · '+hlabel(S.h)+' · '+(pl.gateReasons||[]).join(' · '):'opportunité '+dir+' sur '+P.focusCoin+' · '+hlabel(S.h);
+  $('invalidate').textContent='Invalidation : données live insuffisantes, modèle global non mûr, calibration de rendement net insuffisante, coût > '+P.maxRoundTripCostBps+' bps ou EV nette < '+P.minNetEvBps+' bps.';
   renderEvidence(f,m);renderBook(f);
   $('oi').textContent=nfmt(S.hl.oi,0);var old=S.hl.oiHist.filter(function(q){return q.t<=now()-5*60000}).slice(-1)[0];$('doi').textContent=old&&finite(S.hl.oi)?pct(S.hl.oi/old.v-1):'—';
-  $('fund').textContent=pct(S.hl.funding,4);$('basis').textContent=finite(S.hl.price)&&finite(S.bn.price)?((S.hl.price/S.bn.price-1)*10000).toFixed(1)+' bps':'—';
-  $('spotCvd').textContent=pct(flowRatio(S.bn.spot),1);$('perpCvd').textContent=pct(flowRatio(S.bn.perp),1);$('liq').textContent=pct(liqRatio(S.bn.liq),1);$('atr').textContent=nfmt(f.atr,2);
-  $('derSt').textContent=fresh(S.hl.lastCtx,30000)&&fresh(S.bn.lastMark,5000)?'live':'dégradé';$('l2st').textContent=fresh(S.hl.lastBook,5000)?'live':'stale';
-  var fm=model(S.h,'full'),gm=globalModel(S.h,'full'),w=fm.w[2]&&fm.w[2][FEATS.indexOf('pasr')*2]||0;
+  $('fund').textContent=pct(S.hl.funding,4);$('basis').textContent=fresh(S.hl.lastCtx,30000)&&finite(S.hl.markPx)&&finite(S.hl.oraclePx)&&S.hl.oraclePx?((S.hl.markPx/S.hl.oraclePx-1)*10000).toFixed(2)+' bps':'—';
+  $('spotCvd').textContent=pct(f.flow,1);$('perpCvd').textContent=pct(f.absorption,1);$('liq').textContent=nfmt(S.hl.dayNtlVlm,0);$('atr').textContent=nfmt(f.atr,2);
+  $('derSt').textContent=fresh(S.hl.lastCtx,30000)?'live':'dégradé';$('l2st').textContent=fresh(S.hl.lastBook,5000)?'live':'stale';
+  var fm=model(S.h,'full'),w=fm.w[2]&&fm.w[2][FEATS.indexOf('pasr')*2]||0;
   $('c4').textContent=finite(f.pasr)?f.pasr.toFixed(3):'—';$('pasrW').textContent=w.toFixed(4);$('deltaB').textContent=finite(st.delta)?st.delta.toFixed(4):'—';$('pasrN').textContent=st.n;$('pasrV').textContent=pv;$('pasrState').textContent=pv;$('bucketN').textContent=f.pasrN;
-  $('hist').textContent=(DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[S.h]&&DB.pretrain[S.coin].h[S.h].n)||0;$('live').textContent=st.n;$('brier').textContent=nfmt(st.b,4);$('logloss').textContent=nfmt(st.ll,4);$('hit').textContent=pct(st.hit,1);$('roll').textContent=nfmt(st.roll,4);$('pend').textContent=(DB.pending[S.coin+'_'+S.h]||[]).length;
-  $('learnState').textContent=st.n<30?'LEARNING':st.n<100?'CALIBRATING': 'ADAPTIVE';
-  $('kPrice').textContent=nfmt(S.hl.price,2);$('kDQ').textContent=q+'/100';$('kMix').textContent='GLOBAL '+(m.globalSeen||0)+' live · LOCAL '+(model(S.h,'full').liveSeen||0)+' live';$('kEdge').textContent=finite(pl.edge)?((pl.edge>=0?'+':'')+(pl.edge*100).toFixed(1)+' pt'):'—';var ages=[S.hl.lastBook,S.hl.lastTrades,S.bn.lastPerp,S.bn.lastMark].filter(function(x){return x>0}).map(function(x){return Math.max(0,now()-x)/1000});$('kFresh').textContent=ages.length?Math.round(Math.max.apply(null,ages))+'s':'—';
-  $('chartInfo').textContent='HL '+nfmt(S.hl.price)+' · BN '+nfmt(S.bn.price);try{renderCapital()}catch(e){} try{renderPortfolio()}catch(e){} try{renderHealth()}catch(e){} try{journal()}catch(e){} $('audit').textContent='CAPITAL PAPER = une simulation indépendante par horizon, une seule position active à la fois; sizing au risque '+S.risk+'% de l\'equity, entry/SL/TP enregistrés à t0, sizing incluant stop + commissions + slippage + spread, frais '+S.fee+' bps/side, slippage '+S.slip+' bps/side, funding exclu. Le signal privilégie le modèle appris; l’evidence manuelle reste un faible prior et le PASR est exposé progressivement puis désactivé s’il est statistiquement défavorable. PRETRAIN prix = '+((DB.pretrain[S.coin]&&DB.pretrain[S.coin].h&&DB.pretrain[S.coin].h[S.h]&&DB.pretrain[S.coin].h[S.h].n)||0)+' labels pour '+hlabel(S.h)+'; non présenté comme OOS full. LIVE OOS = prévision gelée à t0 puis résolue au prix observé à t0+h. BASE exclut les features microstructurelles/PASR; FULL les apprend en live. PASR = feature expérimentale, verdict par différence Brier appariée + IC approximatif à 95 %. Warm-start ne réinitialise plus le live.';
-}
-function migrateV16(){
-  if(DB.engineVersion===16)return;
-  var p=portfolioState(),oldPositions=Object.keys(p.positions||{}).length;
-  // V15 allowed many tiny positions and is not comparable to the V16 portfolio construction.
-  // Preserve cash/equity and historical logs, but start the new strategy without carrying legacy inventory.
-  if(oldPositions){p.positions={};p.migration=(p.migration||[]).concat([{ts:now(),from:'V15',droppedPositions:oldPositions,reason:'V16_PORTFOLIO_RESET'}])}
-  DB.paper={};DB.engineVersion=16;
-  // Backfill the new realized-profit calibration from already-resolved shadow forecasts.
-  Object.keys(DB.obs||{}).forEach(function(key){
-    var m=key.match(/^(.*)_([0-9]+)$/);if(!m)return;
-    var coin=m[1],h=+m[2],arr=DB.obs[key]||[];
-    for(var i=0;i<arr.length;i++){var x=arr[i];if(x&&finite(x.netRet)&&Number.isInteger(x.target))updateProfitCalibration(h,coin,x.candidate==='SHORT'?'SHORT':'LONG',x.target,x.netRet,true)}
-  });
-  DB.portfolio=p;save();
+  $('hist').textContent=globalPretrainCount(S.h);$('live').textContent=globalStatsFor(S.h).n;$('brier').textContent=nfmt(globalStatsFor(S.h).b,4);$('logloss').textContent=nfmt(globalStatsFor(S.h).ll,4);$('hit').textContent=pct(globalStatsFor(S.h).hit,1);$('roll').textContent=nfmt(globalStatsFor(S.h).roll,4);$('pend').textContent=(DB.pending[S.coin+'_'+S.h]||[]).length;
+  $('learnState').textContent=globalStatsFor(S.h).n<P.minGlobalProfitObs?'CALIBRATING':globalStatsFor(S.h).net>0?'ADAPTIVE POSITIVE':'ADAPTIVE DEFENSIVE';
+  $('kPrice').textContent=nfmt(S.hl.price,2);$('kDQ').textContent=q+'/100';$('kMix').textContent='GLOBAL '+(m.globalSeen||0)+' live · LOCAL '+(model(S.h,'full').liveSeen||0)+' live · PROFIT OOS '+profitCount(S.h,dir);$('kEdge').textContent=finite(pl.blendedEvBps)?((pl.blendedEvBps>=0?'+':'')+pl.blendedEvBps.toFixed(2)+' bps'):'—';
+  var ages=[S.hl.lastBook,S.hl.lastTrades,S.hl.lastCtx].filter(function(x){return x>0}).map(function(x){return Math.max(0,now()-x)/1000});$('kFresh').textContent=ages.length?Math.round(Math.max.apply(null,ages))+'s':'—';
+  $('chartInfo').textContent='HL '+nfmt(S.hl.price)+' · focus dynamique '+P.focusCoin;
+  try{renderCapital()}catch(e){}try{renderPortfolio()}catch(e){}try{renderHealth()}catch(e){}try{journal()}catch(e){}
+  $('audit').textContent='V16 = portefeuille unique sur tout l’univers Hyperliquid. Les anciens comptes paper par horizon ne pilotent plus l’ouverture. Chaque marché est évalué sur les horizons '+TRADE_H.join('/')+' min, puis le meilleur horizon par actif est comparé aux autres actifs. Les shadow forecasts OOS sont créés même lorsque NO TRADE est affiché; à résolution, leur rendement net après frais, slippage et spread alimente la calibration globale et locale. Aucune donnée Binance n’est nécessaire à la décision. Les nouvelles positions sont limitées aux meilleures opportunités et au budget de risque agrégé; un time-stop empêche une position de monopoliser le capital. Rentabilité non présumée : elle doit être démontrée par le rendement net OOS.';
 }
 function syntheticState(){
   var t=now(),base=83250;
