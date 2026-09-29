@@ -1244,6 +1244,7 @@ async function restSync(){
     if(P.universe.length===0)diagError('UNIVERSE_DISCOVERY',e);
   }
   S.lastRest=t;
+  if(P.universe.length)stage('LIVE');
   return{meta:Array.isArray(metaAll)||!!(metaAll&&metaAll.universe),dexs:Array.isArray(dexs)?dexs.length:0,ctx:Array.isArray(metaCtx),assets:P.universe.length,errors:errs};
 }
 function reconnectHL(){
@@ -1430,7 +1431,7 @@ function renderHealth(){
   var map=Object.keys(f).map(function(k){var v=f[k],cls=v==='OK'?'ok':v==='WAIT'?'warn':'bad';return'<div class="src"><div class="tiny">'+k+'</div><b class="'+cls+'">'+v+'</b></div>'}).join('');
   var desired=Object.keys(P.wsSubDefs||{}).length,acked=Object.keys(P.wsAcked||{}).length,queue=(P.wsQueue||[]).length;
   var liveReady=0;for(var i=0;i<P.universe.length;i++){var a=P.states[P.universe[i]];if(a&&fresh(a.hl.lastPrice,10000)&&fresh(a.hl.lastBook,10000)&&fresh(a.hl.lastTrades,15000))liveReady++}
-  $('health').innerHTML=map;$('healthText').textContent=P.universe.length+' marchés · live-ready '+liveReady+' · subscriptions '+acked+'/'+Math.max(desired,acked)+' acquittées · file '+queue+' · focus '+(P.focusCoin||'—')+' '+(P.focusH||'—')+' · '+new Date().toLocaleTimeString('fr-FR')+' · Hyperliquid natif';
+  $('health').innerHTML=map;$('healthText').textContent=P.universe.length+' marchés · live-ready '+liveReady+' · subscriptions '+acked+'/'+Math.max(desired,acked)+' · micro '+Object.keys(P.microAssets||{}).length+' · reconnexions '+(P.wsReconnects||0)+(P.wsError?' · '+P.wsError:'')+' · file '+queue+' · focus '+(P.focusCoin||'—')+' '+(P.focusH||'—')+' · '+new Date().toLocaleTimeString('fr-FR')+' · Hyperliquid natif';
 }
 function selectFocus(){
   var rows=(P.signalsRows||[]).filter(function(x){return x&&finite(x.price)&&x.h});
@@ -1544,12 +1545,12 @@ async function boot(){
     setInterval(function(){
       if(P.universe.length&&(!P.lastBootstrap||now()-P.lastBootstrap>=P.bootstrapIntervalMs))portfolioBootstrap().then(function(){portfolioScan()}).catch(function(e){diagError('BOOTSTRAP_LOOP',e)});
     },5000);
+    stage(P.universe.length?'LIVE':'CONNECTING');
     setInterval(function(){
       if(now()-S.lastForecast>55000){
         try{forecastAllUniverse();S.lastForecast=now()}catch(e){diagError('FORECAST',e)}
       }
     },5000);
-    stage('LIVE');
   }catch(e){diagError('BOOT_FATAL',e);try{dashboard()}catch(_){}}
 }
 
