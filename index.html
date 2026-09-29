@@ -209,7 +209,7 @@ select,input,button{background:#102029;color:var(--t);border:1px solid var(--l);
 <div class="panel">
   <div class="title"><h3>Journal OOS</h3><span class="tiny">PRETRAIN séparé du LIVE OOS · aucune métrique inventée</span></div>
   <table class="table">
-    <thead><tr><th>Horizon</th><th>Pretrain</th><th>Live OOS</th><th>Capital</th><th>Trades</th><th>Brier</th><th>Log loss</th><th>Hit</th><th>Net OOS</th><th>Δ PASR</th><th>État</th></tr></thead>
+    <thead><tr><th>Horizon</th><th>Pretrain</th><th>Live OOS</th><th>Capital</th><th>Trades</th><th>Brier</th><th>Log loss</th><th>Hit</th><th>Net OOS<br><span class="tiny">actionable</span></th><th>Δ PASR</th><th>État</th></tr></thead>
     <tbody id="journal"></tbody>
   </table>
 </div>
@@ -805,6 +805,7 @@ function recordForecast(h,f,m,pl){
       save();
     }
   }
+  rec.actionable=actionable;
   DB.pending[key].push(rec);
   var maxPending=Math.max(300,Math.min(5000,Math.ceil(h*1.5)));
   DB.pending[key]=DB.pending[key].slice(-maxPending);save();
@@ -927,7 +928,7 @@ function statsFor(h){
   if(!o.length)return{n:0,b:NaN,ll:NaN,hit:NaN,roll:NaN,delta:NaN,ciLo:NaN,ciHi:NaN};
   var bs=o.map(function(x){return brier(x.pf,x.target)}),ls=o.map(function(x){return logloss(x.pf,x.target)}),hits=o.map(function(x){return x.pf.indexOf(Math.max.apply(null,x.pf))===x.target?1:0}),recent=bs.slice(-50);
   var dif=o.map(function(x){return brier(x.pb,x.target)-brier(x.pf,x.target)}),md=metricArr(dif),sd=Math.sqrt(dif.reduce(function(s,x){return s+(x-md)*(x-md)},0)/Math.max(1,dif.length-1)),se=sd/Math.sqrt(Math.max(1,dif.length)),margin=1.96*se;
-  var net=o.map(function(x){return x.netRet}).filter(finite);
+  var net=o.filter(function(x){return x.actionable===true&&finite(x.netRet)}).map(function(x){return x.netRet});
   return{n:o.length,b:metricArr(bs),ll:metricArr(ls),hit:metricArr(hits),roll:metricArr(recent),delta:md,ciLo:md-margin,ciHi:md+margin,net:metricArr(net)};
 }
 function pasrVerdict(h){
