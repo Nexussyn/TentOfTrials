@@ -861,7 +861,6 @@ function orderPlan(h,f,m){
   if(seedMode&&q<P.minSeedDQ)gateReasons.push('SEED_DQ<'+P.minSeedDQ);
   if(!seedMode&&q<70)gateReasons.push('DQ<70');
   if(modelSeen<P.minGlobalModelObs)gateReasons.push('GLOBAL_MODEL_WARMUP');
-  if(!profitReady&&!seedMode)gateReasons.push('PROFIT_CALIBRATION '+profitObs+'/'+P.minGlobalProfitObs);
   var minProb=seedMode?P.seedMinDirProb:P.fullMinDirProb,minLead=seedMode?P.seedMinDirLead:P.fullMinDirLead;
   if(pd<=minProb)gateReasons.push('DIR_PROB≤'+(minProb*100).toFixed(2)+'%');
   if(directionalLead<minLead)gateReasons.push('DIR_LEAD<'+(minLead*100).toFixed(0)+'pt');
@@ -871,14 +870,14 @@ function orderPlan(h,f,m){
   var minEvBps=seedMode?P.seedNetEvBps:P.minNetEvBps;
   if(!finite(blendedEv)||blendedEv*10000<minEvBps)gateReasons.push('NET_EV<'+minEvBps+'bps');
   var gate=gateReasons.length>0;
-  var confidence=seedMode?.5:clamp(Math.min(profitObs/P.minGlobalProfitObs,localProfitObs/Math.max(1,P.minAssetProfitObs)+.2),0,1);
+  var confidence=seedMode?.5:clamp(Math.min(execObs/P.minExecObs,ex.localN/Math.max(1,P.minAssetProfitObs)+.2),0,1);
   var tradeScore=finite(blendedEv)?blendedEv*Math.max(.25,confidence)*(q/100): -Infinity;
   return{
     direction:gate?'NO TRADE':dir,candidate:dir,mode:seedMode?'SEED':'FULL',pd:pd,po:po,edge:pd-po,directionalLead:directionalLead,evidence:es,align:align,q:q,costBps:costBps,
-    profitEv:profitEv,profitEvBps:finite(profitEv)?profitEv*10000:NaN,blendedEv:blendedEv,blendedEvBps:finite(blendedEv)?blendedEv*10000:NaN,
+    profitEv:execEv,profitEvBps:finite(execEv)?execEv*10000:NaN,blendedEv:blendedEv,blendedEvBps:finite(blendedEv)?blendedEv*10000:NaN,
     profitObs:execObs,localProfitObs:ex.localN,execLowerBps:finite(execLower)?execLower*10000:NaN,modelSeen:modelSeen,tradeScore:tradeScore,
     entry:gate?NaN:entry,sl:gate?NaN:sl,tp:gate?NaN:tp,rr:gate?NaN:rr,size:gate?NaN:sz,ev:gate?NaN:blendedEv,evR:gate?NaN:classEv,
-    pair:pair,gateReasons:gateReasons,reason:gate?'Portail fermé : '+gateReasons.join(' · '):(seedMode?'Portail SEED ouvert : probabilité directionnelle > 60% + lead sur NEUTRAL + EV nette ≥ '+P.seedNetEvBps+' bps; taille réduite pour amorcer la calibration.':'Portail FULL ouvert : probabilité directionnelle > 60% + lead sur NEUTRAL + rendement net calibré sur les réalisations de tout l’univers.')
+    pair:pair,gateReasons:gateReasons,reason:gate?'Portail fermé : '+gateReasons.join(' · '):(seedMode?'Portail SEED ouvert : probabilité >60% + lead sur NEUTRAL + evidence alignée + EV théorique ≥ '+P.seedNetEvBps+' bps; exploration à risque réduit.':'Portail FULL ouvert : probabilité >60% + lead + evidence alignée + edge net OOS des signaux actionnables.')
   };
 }
 function hlabel(h){return h===1440?'1j':h===60?'1h':h===240?'4h':h+'m'}
@@ -1511,7 +1510,7 @@ function dashboard(){
   $('act').textContent=dir==='LONG'?'BUY':dir==='SHORT'?'SELL':'NO TRADE';$('ord').textContent=dir==='NO TRADE'?'WAIT':'READY';
   $('entry').textContent=nfmt(pl.entry);$('sl').textContent=nfmt(pl.sl);$('tp').textContent=nfmt(pl.tp);$('rr').textContent=finite(pl.rr)?'1:'+pl.rr.toFixed(2):'—';$('size').textContent=finite(pl.size)?pl.size.toFixed(5):'—';
   $('whyOrder').textContent=pl.reason;
-  $('gateInfo').textContent='Candidat '+pl.candidate+' · prob '+(pl.pd*100).toFixed(1)+'% · lead vs neutral '+(pl.directionalLead*100).toFixed(1)+' pt · EV class. '+(finite(pl.evR)?(pl.evR*10000).toFixed(2)+' bps':'—')+' · EV nette calibrée '+(finite(pl.blendedEvBps)?pl.blendedEvBps.toFixed(2)+' bps':'—')+' · OOS '+pl.profitObs+' global / '+pl.localProfitObs+' actif · mode '+pl.mode+' · coût '+(finite(pl.costBps)?pl.costBps.toFixed(2):'—')+' bps · TP '+(pl.pair?pl.pair.tp:'—')+' ATR · SL '+(pl.pair?pl.pair.sl:'—')+' ATR';
+  $('gateInfo').textContent='Candidat '+pl.candidate+' · prob '+(pl.pd*100).toFixed(1)+'% · lead vs neutral '+(pl.directionalLead*100).toFixed(1)+' pt · EV class. '+(finite(pl.evR)?(pl.evR*10000).toFixed(2)+' bps':'—')+' · EV nette calibrée '+(finite(pl.blendedEvBps)?pl.blendedEvBps.toFixed(2)+' bps':'—')+' · EXEC OOS '+pl.profitObs+' global / '+pl.localProfitObs+' actif · LCB '+(finite(pl.execLowerBps)?pl.execLowerBps.toFixed(2):'—')+' bps · mode '+pl.mode+' · coût '+(finite(pl.costBps)?pl.costBps.toFixed(2):'—')+' bps · TP '+(pl.pair?pl.pair.tp:'—')+' ATR · SL '+(pl.pair?pl.pair.sl:'—')+' ATR';
   $('headline').textContent=dir==='NO TRADE'?'surveillance de '+P.focusCoin+' · '+hlabel(S.h)+' · '+(pl.gateReasons||[]).join(' · '):'opportunité '+dir+' sur '+P.focusCoin+' · '+hlabel(S.h);
   $('invalidate').textContent='Invalidation : données BBO/prix insuffisantes, modèle global non mûr, DQ seed insuffisante, calibration complète insuffisante hors SEED, coût > '+P.maxRoundTripCostBps+' bps ou EV nette sous le seuil actif.';
   renderEvidence(f,m);renderBook(f);
