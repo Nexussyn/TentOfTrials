@@ -388,7 +388,7 @@ var P={
   maxAssets:Infinity,maxSlots:Infinity,maxConcurrentPositions:4,maxLeverage:5,maxMarginPct:.20,maxPortfolioRiskPct:.02,maxSameSide:Infinity,
   maxRoundTripCostBps:24,minGlobalProfitObs:200,minAssetProfitObs:5,minGlobalModelObs:120,minAssetLiveObs:20,
   bootstrapConcurrency:1,bootstrapIntervalMs:60000,bootstrapMinSpacingMs:2500,bootstrapRunning:false,bootstrapIntervalSince:0,
-  wsQueue:[],wsWanted:{},wsAcked:{},wsSentAt:{},wsPumpTimer:0,wsGeneration:0,
+  wsQueue:[],wsWanted:{},wsAcked:{},wsSentAt:{},wsSubDefs:{},wsPumpTimer:0,wsWatchdog:0,wsGeneration:0,
   h:5,lastScan:0,lastMeta:0,lastBootstrap:0,bootstrapped:{},positions:{},cooldown:{},signalsRows:[],lastOpenRejects:{}
 };
 function newAssetState(){
@@ -1041,7 +1041,7 @@ function subKey(s){
 }
 function queueSubscription(sub){
   var k=subKey(sub);if(!k||P.wsAcked[k]||P.wsWanted[k])return false;
-  P.wsWanted[k]=true;P.wsQueue.push(sub);return true;
+  P.wsWanted[k]=true;P.wsSubDefs[k]=sub;P.wsQueue.push(sub);return true;
 }
 function pumpSubscriptions(ws){
   if(!ws||ws.readyState!==1||P.wsPumpTimer||P.wsQueue.length===0)return;
@@ -1053,7 +1053,7 @@ function pumpSubscriptions(ws){
       try{
         ws.send(JSON.stringify({method:'subscribe',subscription:sub}));
         P.wsSentAt[k]=now();
-      }catch(e){delete P.wsWanted[k];}
+      }catch(e){delete P.wsWanted[k];delete P.wsSubDefs[k];}
       P.wsPumpTimer=setTimeout(step,110);
     }
   };
@@ -1108,8 +1108,18 @@ function reconnectHL(){
     try{
       var ws=new WebSocket(HLWS);S.hlSocket=ws;
       ws.onopen=function(){
-        attempt=0;P.wsGeneration++;P.wsQueue=[];P.wsWanted={};P.wsAcked={};P.wsSentAt={};clearTimeout(P.wsPumpTimer);P.wsPumpTimer=0;S.feed.HL_WS='OK';
+        attempt=0;P.wsGeneration++;P.wsQueue=[];P.wsWanted={};P.wsAcked={};P.wsSentAt={};P.wsSubDefs={};clearTimeout(P.wsPumpTimer);P.wsPumpTimer=0;clearInterval(P.wsWatchdog);P.wsWatchdog=0;S.feed.HL_WS='OK';
         subscribeNewPortfolioAssets();
+        P.wsWatchdog=setInterval(function(){
+          if(ws!==S.hlSocket||ws.readyState!==1)return;
+          var t0=now();
+          Object.keys(P.wsSentAt).forEach(function(k){
+            if(!P.wsAcked[k]&&t0-P.wsSentAt[k]>8000&&P.wsSubDefs[k]){
+              delete P.wsWanted[k];delete P.wsSentAt[k];queueSubscription(P.wsSubDefs[k]);
+            }
+          });
+          pumpSubscriptions(ws);
+        },5000);
         clearInterval(timer);timer=setInterval(function(){if(ws.readyState===1)ws.send(JSON.stringify({method:'ping'}))},30000);
       };
       ws.onmessage=function(e){try{
@@ -1139,7 +1149,7 @@ function reconnectHL(){
           }
         }
       }catch(e){diagError('HL_WS_MESSAGE',e)}};
-      ws.onclose=function(){clearInterval(timer);clearTimeout(P.wsPumpTimer);P.wsPumpTimer=0;P.wsQueue=[];P.wsWanted={};P.wsAcked={};P.wsSentAt={};S.feed.HL_WS='RECONNECTING';setTimeout(go,clamp(1000*Math.pow(2,Math.min(attempt,6)),1000,30000))};
+      ws.onclose=function(){clearInterval(timer);clearInterval(P.wsWatchdog);P.wsWatchdog=0;clearTimeout(P.wsPumpTimer);P.wsPumpTimer=0;P.wsQueue=[];P.wsWanted={};P.wsAcked={};P.wsSentAt={};P.wsSubDefs={};S.feed.HL_WS='RECONNECTING';setTimeout(go,clamp(1000*Math.pow(2,Math.min(attempt,6)),1000,30000))};
       ws.onerror=function(){try{ws.close()}catch(e){}};
     }catch(e){setTimeout(go,3000)}
   }
